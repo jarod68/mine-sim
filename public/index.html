@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mine Sim — Open Pit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div id="asset-details" class="asset"></div>
+    <div class="credit" id="credit">$0</div>
+    <div class="tools">
+      <ul class="legend">
+        <li><span class="sw" style="background:#39414c"></span>Unexplored</li>
+        <li><span class="sw" style="background:#8a5a2b"></span>Dirt</li>
+        <li><span class="sw" style="background:#9aa7b8"></span>Iron</li>
+        <li><span class="sw" style="background:#cd6e2e"></span>Copper</li>
+        <li><span class="sw" style="background:#e8c34a"></span>Gold</li>
+        <li><span class="sw" style="background:#3d3d3d"></span>Carbon</li>
+      </ul>
+      <div class="modes">
+        <button id="mode-mouse" class="mode active">🖱 Mouse</button>
+        <button id="mode-road" class="mode">✏️ Road</button>
+        <button id="mode-erase" class="mode">🧽 Eraser</button>
+        <button id="invert-dir">⇄ Invert</button>
+      </div>
+      <button id="regen">New mine</button>
+    </div>
+  </header>
+
+  <main>
+    <canvas id="mine"></canvas>
+    <canvas id="roads-layer"></canvas>
+    <canvas id="vehicle-layer"></canvas>
+    <div id="popup" class="popup"></div>
+  </main>
+
+  <p class="hint">Scroll to zoom, hold right-click to pan. Click a block to drill, click a vehicle for details. Drive with arrow keys (diagonals for light vehicles); haul trucks run automatically.</p>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
