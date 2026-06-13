@@ -25,14 +25,37 @@ const ORE_VALUE = {
 // crusher is computed on the server so it stays fixed across page refreshes.
 const PARKING = { x: 3, y: 2, w: 6, h: 3 };
 
+// Parking footprint in BLOCK coordinates.
+const PARK_BLOCKS = {
+  bx0: Math.floor(PARKING.x / 2),
+  by0: Math.floor(PARKING.y / 2),
+  bx1: Math.floor((PARKING.x + PARKING.w - 1) / 2),
+  by1: Math.floor((PARKING.y + PARKING.h - 1) / 2),
+};
+
+function blockDistToParking(bx, by) {
+  const dx = Math.max(PARK_BLOCKS.bx0 - bx, 0, bx - PARK_BLOCKS.bx1);
+  const dy = Math.max(PARK_BLOCKS.by0 - by, 0, by - PARK_BLOCKS.by1);
+  return Math.max(dx, dy);
+}
+
+// Crusher: 1-block footprint, never on the parking, 2..15 blocks away from it.
 function placeCrusher() {
-  const pbx = Math.floor((PARKING.x + PARKING.w / 2) / 2);
-  const pby = Math.floor((PARKING.y + PARKING.h / 2) / 2);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const ang = Math.random() * Math.PI * 2;
-  const cbx = clamp(Math.round(pbx + Math.cos(ang) * 15), 1, COLS - 2);
-  const cby = clamp(Math.round(pby + Math.sin(ang) * 15), 1, ROWS - 2);
-  return { x: cbx * 2, y: cby * 2, w: 2, h: 2 };
+  const pcx = (PARK_BLOCKS.bx0 + PARK_BLOCKS.bx1) / 2;
+  const pcy = (PARK_BLOCKS.by0 + PARK_BLOCKS.by1) / 2;
+  for (let i = 0; i < 800; i++) {
+    const dist = 2 + Math.random() * 13; // 2 .. 15 blocks
+    const ang = Math.random() * Math.PI * 2;
+    const cbx = clamp(Math.round(pcx + Math.cos(ang) * dist), 0, COLS - 1);
+    const cby = clamp(Math.round(pcy + Math.sin(ang) * dist), 0, ROWS - 1);
+    const d = blockDistToParking(cbx, cby);
+    if (d >= 2 && d <= 15) return { x: cbx * 2, y: cby * 2, w: 2, h: 2 };
+  }
+  // fallback: opposite corner, still within range after clamping
+  const fbx = clamp(Math.round(pcx) + 8, 0, COLS - 1);
+  const fby = clamp(Math.round(pcy) + 8, 0, ROWS - 1);
+  return { x: fbx * 2, y: fby * 2, w: 2, h: 2 };
 }
 
 let mine = generateMine(COLS, ROWS);
