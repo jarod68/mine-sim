@@ -55,6 +55,9 @@ export class Autopilot {
     this.state = new Map();        // truck  → { phase, dir, timer, bucket }
     this._shovelLock  = new Map(); // shovel → truck (current loader)
     this._crusherLock = null;      // truck (current dumper) | null
+    this.shovels      = new Set(); // every registered excavator (for relocation)
+    this._shovelMove  = new Map(); // shovel → { gx, gy } relocation target cell
+    this._manual      = new Set(); // shovels under manual control (no auto-move)
     this.isFree = null;            // injected by Fleet: (gx,gy,self) → bool
   }
 
@@ -68,13 +71,45 @@ export class Autopilot {
       for (const t of this.links.keys()) t.task = null;
       this._shovelLock.clear();
       this._crusherLock = null;
+      this._shovelMove.clear();
     }
   }
+
+  // Register an excavator so it auto-relocates to adjacent ore when exhausted,
+  // even before any truck is assigned to it.
+  addShovel(shovel) { if (shovel) this.shovels.add(shovel); }
+
+  // The player took manual control of a vehicle (arrow keys). Works for both:
+  //   • shovel — cancels any pending relocation and stops auto-relocating it.
+  //   • truck  — releases its station locks and clears its task so it stops
+  //              hauling; it is driven entirely by the keyboard until released.
+  setManual(v) {
+    this._manual.add(v);
+    this._shovelMove.delete(v);  // shovel: cancel relocation (no-op for trucks)
+    this._freeLocks(v);          // truck: drop any shovel/crusher lock it holds
+    v.task = null;
+  }
+
+  // Hand a truck back to the autopilot (called when it is deselected). It
+  // re-plans from its current position: deliver if loaded, else fetch more ore.
+  clearManual(v) {
+    if (!this._manual.has(v)) return;
+    this._manual.delete(v);
+    const st = this.state.get(v);
+    if (st) {
+      st.phase = v.load > 0 ? 'to_crusher' : 'to_shovel';
+      st.dir = null;
+      st.timer = 0;
+    }
+  }
+
+  isManual(v) { return this._manual.has(v); }
 
   assign(truck, shovel) {
     this._freeLocks(truck);
     if (shovel) {
       this.links.set(truck, shovel);
+      this.shovels.add(shovel);
     } else {
       this.links.delete(truck);
       this.state.delete(truck);
@@ -84,13 +119,24 @@ export class Autopilot {
   }
 
   assignedShovel(t) { return this.links.get(t) ?? null; }
-  controls(v)       { return this.enabled && this.links.has(v); }
-  dirFor(v)         { return this.state.get(v)?.dir ?? null; }
+
+  // Fleet drives any vehicle for which controls() is true, using dirFor().
+  // Trucks are driven by their state machine; a relocating shovel by its step.
+  // A manually-controlled vehicle is NOT driven by the autopilot (keyboard wins).
+  controls(v) {
+    if (!this.enabled || this._manual.has(v)) return false;
+    return this.links.has(v) || this._shovelMove.has(v);
+  }
+  dirFor(v) {
+    if (this._shovelMove.has(v)) return this._shovelStep(v);
+    return this.state.get(v)?.dir ?? null;
+  }
 
   update(dt) {
     if (!this.enabled) return;
-    for (const s of this.links.values()) s.digging = false; // reset per frame
+    for (const s of this.shovels) s.digging = false; // reset per frame
     for (const [truck, shovel] of this.links) this._tick(dt, truck, shovel);
+    this._updateShovels();
   }
 
   // ── Station locks ───────────────────────────────────────────────────────
@@ -109,6 +155,67 @@ export class Autopilot {
     if (this._crusherLock === truck) this._crusherLock = null;
   }
 
+  // ── Shovel relocation ───────────────────────────────────────────────────
+  //
+  // When the block under a shovel is exhausted, the shovel walks to the richest
+  // adjacent EXPLORED block that still holds ore. It drives there cell by cell
+  // (Fleet moves it via controls()/dirFor()) and never relocates while actively
+  // loading a truck. If no adjacent ore is known, it stays put — its trucks fall
+  // back to parking until the player drills more ground nearby.
+
+  _updateShovels() {
+    for (const shovel of this.shovels) {
+      const move = this._shovelMove.get(shovel);
+      if (move) {
+        if (!shovel.moving && shovel.gx === move.gx && shovel.gy === move.gy)
+          this._shovelMove.delete(shovel);     // arrived on the new block
+        continue;                              // keep travelling otherwise
+      }
+      if (this._manual.has(shovel)) continue;  // player-controlled — never auto-move
+      if (shovel.digging) continue;            // mid-load — don't abandon a truck
+
+      const bx = Math.floor(shovel.gx / 2);
+      const by = Math.floor(shovel.gy / 2);
+      const here   = this.hooks.getBlock(bx, by);
+      const hasOre = here && here.explored && here.ore && here.oreRemaining > 0;
+      if (hasOre) continue;                    // still productive
+
+      const next = this._richestAdjacentOre(bx, by);
+      if (next) {
+        this._shovelMove.set(shovel, {
+          gx: next.bx * 2 + (shovel.gx % 2),   // keep the same in-block offset
+          gy: next.by * 2 + (shovel.gy % 2),
+        });
+      }
+    }
+  }
+
+  // Richest adjacent (8-neighbour) explored block that still has ore, or null.
+  _richestAdjacentOre(bx, by) {
+    const NB = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    let best = null;
+    for (const [dx, dy] of NB) {
+      const b = this.hooks.getBlock(bx + dx, by + dy);
+      if (b && b.explored && b.ore && b.oreRemaining > 0 &&
+          (!best || b.oreRemaining > best.ore))
+        best = { bx: bx + dx, by: by + dy, ore: b.oreRemaining };
+    }
+    return best;
+  }
+
+  // Next step [dx,dy] for a relocating shovel (diagonals allowed). Computed from
+  // the LOGICAL cell (the target while mid-step) so the shovel stops exactly on
+  // its destination instead of overshooting when Vehicle.update chains a step.
+  _shovelStep(shovel) {
+    const t = this._shovelMove.get(shovel);
+    if (!t) return null;
+    const cx = shovel.moving ? shovel.tgx : shovel.gx;
+    const cy = shovel.moving ? shovel.tgy : shovel.gy;
+    const dx = Math.sign(t.gx - cx);
+    const dy = Math.sign(t.gy - cy);
+    return (dx === 0 && dy === 0) ? null : [dx, dy];
+  }
+
   // ── Per-truck state machine ─────────────────────────────────────────────
 
   _ensure(truck) {
@@ -119,6 +226,7 @@ export class Autopilot {
   _tick(dt, truck, shovel) {
     const st = this.state.get(truck);
     if (!st) return;
+    if (this._manual.has(truck)) { st.dir = null; return; } // driven by the player
     const sb = { bx: Math.floor(shovel.gx / 2), by: Math.floor(shovel.gy / 2) };
 
     switch (st.phase) {
@@ -265,16 +373,24 @@ export class Autopilot {
   }
 
   _doDump(dt, truck, st) {
+    // Capture the full load once, then drain the bed gradually so the payload %
+    // counts down while dumping.
+    if (st.dumpTotal == null) { st.dumpTotal = truck.load; st.dumpOre = truck.loadOre; }
     st.timer += dt;
-    truck.task = { kind: 'dump', progress: Math.min(1, st.timer / DUMP_TIME) };
+    const progress = Math.min(1, st.timer / DUMP_TIME);
+    truck.task = { kind: 'dump', progress };
+    truck.load = st.dumpTotal * (1 - progress);  // bed empties as it dumps
+
     if (st.timer >= DUMP_TIME) {
-      if (truck.load > 0) this.hooks.deliver(truck.loadOre, truck.load);
+      if (st.dumpTotal > 0) this.hooks.deliver(st.dumpOre, st.dumpTotal);
       // Release the crusher BEFORE pulling away so the next queued truck can
       // start dumping immediately.
       this._unlockCrusher(truck);
       truck.load    = 0;
       truck.loadOre = null;
       truck.task    = null;
+      st.dumpTotal  = null;
+      st.dumpOre    = null;
       st.phase = 'to_shovel';
       st.timer = 0;
     }

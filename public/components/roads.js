@@ -20,10 +20,35 @@ export class Roads {
     this.editing = false;        // draw or erase active → denser/highlighted arrows
     this.drawing = false;
     this.last = null;
+    this.onChange = null;        // called after edits (persist to server)
 
     canvas.addEventListener('pointerdown', (e) => this._down(e));
     window.addEventListener('pointermove', (e) => this._move(e));
-    window.addEventListener('pointerup', () => { this.drawing = false; });
+    window.addEventListener('pointerup', () => {
+      if (this.drawing) { this.drawing = false; this._changed(); }
+    });
+  }
+
+  _changed() { if (this.onChange) this.onChange(); }
+
+  // Non-parking road cells, as a plain array (for server persistence).
+  serialize() {
+    const out = [];
+    for (const c of this.cells.values()) {
+      if (c.parking) continue;
+      out.push({ gx: c.gx, gy: c.gy, dir: c.dir });
+    }
+    return out;
+  }
+
+  // Restore a road network from serialized cells (does not touch parking pads).
+  load(cells) {
+    if (!Array.isArray(cells)) return;
+    for (const c of cells) {
+      const cell = this._ensure(c.gx, c.gy);
+      cell.dir = c.dir || null;
+    }
+    this.render();
   }
 
   resize(cssW, cssH) {
@@ -49,11 +74,13 @@ export class Roads {
       if (c.dir) c.dir = { dx: -c.dir.dx, dy: -c.dir.dy };
     }
     this.render();
+    this._changed();
   }
 
   clear() {
     this.cells.clear();
     this.render();
+    this._changed();
   }
 
   isRoad(gx, gy) {

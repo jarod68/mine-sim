@@ -2,7 +2,7 @@
 // offers a "Drill & Explore" button; once drilled it shows the dirt/ore gauge
 // with remaining tonnage.
 
-import { COLORS, ORE_LABELS, BLOCK_TONNAGE } from './mine.js';
+import { COLORS_SOLID as COLORS, ORE_LABELS, BLOCK_TONNAGE } from './mine.js';
 
 const tons = (t) => `${Math.round(t).toLocaleString('en-US')} t`;
 

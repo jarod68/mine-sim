@@ -75,37 +75,47 @@ export class GameCanvas {
     return ((h % 100) / 100) * 0.09;
   }
 
+  // Diagonal hatching clipped to a block — marks a cell that still holds ore.
+  _hatch(px, py, bw, bh) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px, py, bw, bh);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(225, 255, 240, 0.22)';
+    ctx.lineWidth = Math.max(1, Math.min(bw, bh) * 0.05);
+    const gap = Math.max(4, Math.min(bw, bh) * 0.24);
+    for (let d = -bh; d < bw; d += gap) {
+      ctx.beginPath();
+      ctx.moveTo(px + d, py);
+      ctx.lineTo(px + d + bh, py + bh);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   _drawBlock(block, px, py) {
     const ctx = this.ctx;
     const { bw, bh } = this;
 
+    // Translucent fills over the near-black canvas (glass-terminal look).
     if (!block.explored) {
-      // hidden until drilled — neutral colour + a faint "?"
+      // undiscovered — dim phosphor void
       ctx.fillStyle = COLORS.unexplored;
       ctx.fillRect(px, py, bw, bh);
-      ctx.fillStyle = `rgba(0, 0, 0, ${this._shade(block.x, block.y)})`;
+    } else if (block.ore && block.oreRemaining > 0) {
+      // still holds minable ore — neon ore glow, hatched to mark the deposit
+      ctx.fillStyle = COLORS[block.ore];
       ctx.fillRect(px, py, bw, bh);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-      ctx.font = `${Math.round(Math.min(bw, bh) * 0.5)}px system-ui`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('?', px + bw / 2, py + bh / 2);
+      this._hatch(px, py, bw, bh);
     } else {
-      // dirt base
+      // mined out (or barren) — faint void, no hatching
       ctx.fillStyle = COLORS.dirt;
       ctx.fillRect(px, py, bw, bh);
-      // ore tint (color = type, opacity = remaining richness; fades as mined)
-      if (block.ore && block.oreRemaining > 0) {
-        const frac = block.oreRemaining / block.tonnage; // 0 .. ~0.6
-        ctx.globalAlpha = 0.18 + 0.72 * Math.min(1, frac / 0.6);
-        ctx.fillStyle = COLORS[block.ore];
-        ctx.fillRect(px, py, bw, bh);
-        ctx.globalAlpha = 1;
-      }
     }
 
-    // 4 sub-zones (2×2) — dashed guides
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    // 4 sub-zones (2×2) — faint phosphor guides
+    ctx.strokeStyle = 'rgba(92, 209, 122, 0.10)';
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -116,8 +126,8 @@ export class GameCanvas {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // block border
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+    // block border — phosphor grid line
+    ctx.strokeStyle = 'rgba(92, 209, 122, 0.16)';
     ctx.lineWidth = 1;
     ctx.strokeRect(px + 0.5, py + 0.5, bw, bh);
   }
