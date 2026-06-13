@@ -4,11 +4,23 @@ import { Fleet, Vehicle } from './components/vehicle.js';
 import { Roads } from './components/roads.js';
 import { Autopilot } from './components/auto.js';
 import { camera, toWorld } from './components/camera.js';
+import { COLORS_SOLID } from './components/mine.js';
 
 const canvas = document.getElementById('mine');
 const creditEl = document.getElementById('credit');
 const assetEl = document.getElementById('asset-details');
 const popup = new BlockPopup(document.getElementById('popup'));
+
+// Paint the legend swatches from the single source of truth (COLORS).
+function paintLegend() {
+  for (const sw of document.querySelectorAll('.legend .sw')) {
+    const ore = sw.dataset.ore;
+    if (ore && COLORS_SOLID[ore]) {
+      sw.style.background = COLORS_SOLID[ore];
+      sw.style.boxShadow = `0 0 6px ${COLORS_SOLID[ore]}`; // phosphor glow
+    }
+  }
+}
 
 let game;
 let fleet;
@@ -70,6 +82,7 @@ const onBlockClick = (block, pos) => {
 };
 
 async function init() {
+  paintLegend();
   const state = await getState();
   drillCost = state.drillCost;
   setCredit(state.credit);
@@ -94,6 +107,9 @@ async function init() {
   const PARK = state.parking;
   roads.addParking(PARK.x, PARK.y, PARK.w, PARK.h);
   roads.setCrusher(state.crusher.x, state.crusher.y, state.crusher.w, state.crusher.h);
+  // Restore the persisted road network and save back to the server on every edit.
+  if (state.roads) roads.load(state.roads);
+  roads.onChange = scheduleRoadsSave;
 
   fleet = new Fleet(document.getElementById('vehicle-layer'), { w: VIEW_W, h: VIEW_H }, grid);
   fleet.setRoads(roads);
@@ -105,29 +121,50 @@ async function init() {
     type: 'excavator', label: 'HEX01', gx: 12, gy: 12,
     len: zone * 1.2, wid: zone * 0.95,
   });
+  const shovel2 = new Vehicle({
+    type: 'excavator', label: 'HEX02', gx: 20, gy: 16,
+    len: zone * 1.2, wid: zone * 0.95,
+  });
   fleet.add(shovel);
-  const oht1 = new Vehicle({
-    type: 'oht', label: 'OHT01', gx: PARK.x + 1, gy: PARK.y + 1,
-    len: zone * 1.7, wid: zone * 0.7,
+  fleet.add(shovel2);
+
+  const mkOHT = (label, gx, gy) => new Vehicle({
+    type: 'oht', label, gx, gy, len: zone * 1.7, wid: zone * 0.7,
   });
-  const oht2 = new Vehicle({
-    type: 'oht', label: 'OHT02', gx: PARK.x + 4, gy: PARK.y + 1,
-    len: zone * 1.7, wid: zone * 0.7,
-  });
+  const oht1 = mkOHT('OHT01', PARK.x + 1, PARK.y);
+  const oht2 = mkOHT('OHT02', PARK.x + 3, PARK.y);
+  const oht3 = mkOHT('OHT03', PARK.x + 5, PARK.y);
+  const oht4 = mkOHT('OHT04', PARK.x + 1, PARK.y + 1);
   fleet.add(oht1);
   fleet.add(oht2);
+  fleet.add(oht3);
+  fleet.add(oht4);
 
-  // Autopilot is the natural, always-on behaviour. Assigned OHTs haul on their
-  // own; the two default trucks start assigned to the shovel.
+  // Autopilot is the natural, always-on behaviour. Both shovels work in
+  // parallel; trucks are assigned two per shovel and can be re-assigned to
+  // either shovel from the Asset details panel.
   autopilot = new Autopilot(grid, roads, {
     getBlock: (bx, by) => game.mine.blocks[by]?.[bx],
     mineBlock,
     deliver,
   });
   fleet.setAutopilot(autopilot);
+  autopilot.addShovel(shovel);
+  autopilot.addShovel(shovel2);
   autopilot.assign(oht1, shovel);
   autopilot.assign(oht2, shovel);
+  autopilot.assign(oht3, shovel2);
+  autopilot.assign(oht4, shovel2);
   autopilot.setEnabled(true);
+
+  // Vehicles always start parked (initial placement above). Their live positions
+  // are streamed to the server continuously, plus a reliable beacon save when
+  // the tab is hidden or closed — positions are persisted at all times.
+  setInterval(saveVehicles, 300);
+  window.addEventListener('pagehide', beaconVehicles);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) beaconVehicles();
+  });
 
   setupModes();
   renderAsset(null);
@@ -234,6 +271,56 @@ async function deliver(ore, tons) {
   setCredit(data.credit);
 }
 
+// ── Server-side persistence: roads & live vehicle positions ──
+
+let roadsSaveTimer = null;
+function scheduleRoadsSave() {
+  clearTimeout(roadsSaveTimer);
+  roadsSaveTimer = setTimeout(saveRoads, 400); // debounce rapid edits
+}
+
+async function saveRoads() {
+  try {
+    await fetch('/api/roads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cells: roads.serialize() }),
+    });
+  } catch { /* offline — keep playing, retry on next edit */ }
+}
+
+function vehicleSnapshot() {
+  const out = {};
+  for (const v of fleet.vehicles) {
+    out[v.label] = {
+      gx: v.gx, gy: v.gy, x: v.x, y: v.y,
+      heading: v.heading, load: v.load, loadOre: v.loadOre, type: v.type,
+    };
+  }
+  return out;
+}
+
+async function saveVehicles() {
+  if (!fleet) return;
+  try {
+    await fetch('/api/vehicles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vehicles: vehicleSnapshot() }),
+    });
+  } catch { /* offline — next tick retries */ }
+}
+
+// Reliable save on tab hide / close (fetch may be cancelled during unload).
+function beaconVehicles() {
+  if (!fleet || !navigator.sendBeacon) return;
+  try {
+    const body = new Blob([JSON.stringify({ vehicles: vehicleSnapshot() })],
+      { type: 'application/json' });
+    navigator.sendBeacon('/api/vehicles', body);
+  } catch { /* ignore */ }
+}
+
 // ── Asset details panel (top-left) ──
 function renderAsset(v) {
   if (!v) {
@@ -284,6 +371,9 @@ document.getElementById('regen').addEventListener('click', async () => {
   drillCost = state.drillCost;
   setCredit(state.credit);
   game.setMine(state);
+  roads.clear();   // fresh mine ⇒ wipe the road network (also clears on server)
+  const PARK = state.parking;
+  roads.addParking(PARK.x, PARK.y, PARK.w, PARK.h);
   roads.setCrusher(state.crusher.x, state.crusher.y, state.crusher.w, state.crusher.h);
 });
 

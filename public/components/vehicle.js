@@ -7,6 +7,7 @@
 // the light pickup.
 
 import { applyCamera } from './camera.js';
+import { COLORS_SOLID } from './mine.js';
 
 const BASE_SPEED = 168; // px/s for the light vehicle
 
@@ -52,6 +53,7 @@ export class Vehicle {
     this.loadOre = null;     // ore type carried
     this.task = null;        // { kind:'load'|'dump', progress } during auto wait
     this.digging = false;    // shovel actively loading a truck (drives animation)
+    this.manual = false;     // player is driving it (keyboard) — bypass autopilot
     this.hitR = Math.max(len, wid) * 0.72;
     this.selR = Math.max(len, wid) * 0.62;
   }
@@ -82,8 +84,9 @@ export class Vehicle {
       const nx = this.gx + dx;
       const ny = this.gy + dy;
       const inBounds = nx >= 0 && nx < grid.zoneCols && ny >= 0 && ny < grid.zoneRows;
-      // OHTs may only drive on roads (incl. parking pads).
-      const onRoad = !this.roadOnly || (isRoad && isRoad(nx, ny));
+      // OHTs may only drive on roads (incl. parking pads) — unless under manual
+      // control, where the player can drive anywhere, even off-road.
+      const onRoad = !this.roadOnly || this.manual || (isRoad && isRoad(nx, ny));
       // The WHOLE vehicle (its full footprint at the target, cab included) must
       // be clear of other vehicles — not just its centre cell.
       const cells = this.cellsAround(nx, ny, { dx, dy }, grid);
@@ -134,9 +137,28 @@ export class Vehicle {
     ctx.save();
     ctx.rotate(this.heading);
     if (this.type === 'excavator') drawExcavator(ctx, this.len, this.wid, this.digging);
-    else if (this.type === 'oht') drawOHT(ctx, this.len, this.wid, this.load);
-    else drawPickup(ctx, this.len, this.wid);
+    else if (this.type === 'oht') {
+      const oreColor = this.loadOre ? COLORS_SOLID[this.loadOre] : null;
+      drawOHT(ctx, this.len, this.wid, this.load, oreColor);
+    } else drawPickup(ctx, this.len, this.wid);
     ctx.restore();
+
+    // payload fill % on the dump bed (upright over the bed, which sits at the
+    // rear −x of the truck; rotate the offset so it tracks the heading).
+    if (this.type === 'oht' && this.load > 0 && this.payload) {
+      const pct = Math.round((this.load / this.payload) * 100);
+      const bedX = -this.len * 0.18;
+      const bx = bedX * Math.cos(this.heading);
+      const by = bedX * Math.sin(this.heading);
+      ctx.font = 'bold 5.5px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.strokeText(`${pct}%`, bx, by);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(`${pct}%`, bx, by);
+    }
 
     // load / dump progress bar (upright, above the vehicle)
     if (this.task) {
@@ -254,10 +276,22 @@ export class Fleet {
     const dt = Math.min(0.05, (now - this._last) / 1000);
     this._last = now;
 
-    // Non-road vehicles may move diagonally; OHTs stay 4-way (roads are
-    // orthogonal).
-    const allowDiagonal = this.selected && !this.selected.roadOnly;
-    const kbDir = this.selected ? this._currentDir(allowDiagonal) : null;
+    // A deselected truck resumes autopilot; a deselected manual shovel stays
+    // manual (it keeps the position the player chose, no auto-relocation).
+    if (this._prevSelected && this._prevSelected !== this.selected) {
+      const prev = this._prevSelected;
+      if (prev.manual && prev.type === 'oht') {
+        prev.manual = false;
+        if (this.autopilot) this.autopilot.clearManual(prev);
+      }
+    }
+    this._prevSelected = this.selected;
+
+    // The selected vehicle may move diagonally (incl. trucks driven manually
+    // off-road); autopilot-driven trucks stay 4-way on the roads.
+    const sel = this.selected;
+    const allowDiagonal = !!sel;
+    const kbDir = sel ? this._currentDir(allowDiagonal) : null;
     const isRoad = this.roads ? (gx, gy) => this.roads.isRoad(gx, gy) : null;
     const isFree = (gx, gy, self) => this._isFree(gx, gy, self);
 
@@ -268,8 +302,17 @@ export class Fleet {
 
     for (const v of this.vehicles) {
       let dir = null;
-      if (this.autopilot && this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
-      else if (v === this.selected) dir = kbDir;
+      // Driving the selected vehicle with the keyboard takes over: it switches
+      // to manual (autopilot released) and follows the arrows until deselected.
+      if (v === sel && kbDir) {
+        if (this.autopilot) this.autopilot.setManual(v);
+        v.manual = true;
+        dir = kbDir;
+      } else if (this.autopilot && this.autopilot.controls(v)) {
+        dir = this.autopilot.dirFor(v);
+      } else if (v === sel) {
+        dir = kbDir; // selected, idle (no autopilot, no keys) → hold
+      }
       v.update(dt, dir, this.grid, isRoad, isFree);
     }
 
@@ -385,8 +428,9 @@ function drawExcavator(ctx, L, W, digging) {
 }
 
 // Off-highway haul truck (tomberau) — long, dump bed at the rear (−x), cab and
-// grille at the front (+x), dual rear axles.
-function drawOHT(ctx, L, W, load = 0) {
+// grille at the front (+x), dual rear axles. `oreColor` tints the load well with
+// the carried material's colour.
+function drawOHT(ctx, L, W, load = 0, oreColor = null) {
   // tyres
   ctx.fillStyle = '#111317';
   const ww = W * 0.24;
@@ -400,12 +444,12 @@ function drawOHT(ctx, L, W, load = 0) {
   axle(-L * 0.1);          // rear dual
   axle(-L * 0.26);
 
-  // dump bed (rear) with a load well that fills with ore when carrying
+  // dump bed (rear) with a load well that shows the carried material's colour
   ctx.fillStyle = '#d39a26';
   ctx.beginPath();
   ctx.roundRect(-L * 0.5, -W / 2, L * 0.64, W, W * 0.18);
   ctx.fill();
-  ctx.fillStyle = load > 0 ? '#b97a2c' : '#6f5a1c';
+  ctx.fillStyle = (load > 0 && oreColor) ? oreColor : '#6f5a1c';
   ctx.beginPath();
   ctx.roundRect(-L * 0.45, -W * 0.36, L * 0.5, W * 0.72, 2);
   ctx.fill();

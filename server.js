@@ -62,6 +62,12 @@ let mine = generateMine(COLS, ROWS);
 let credit = STARTING_CREDIT;
 let crusher = placeCrusher();
 
+// Player-drawn road network and live vehicle positions are kept server-side so
+// they survive a page refresh. Roads: [{ gx, gy, dir:{dx,dy}|null }].
+// Vehicles: { [label]: { gx, gy, x, y, heading, load, loadOre, type } }.
+let roads = [];
+let vehicles = {};
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -80,6 +86,8 @@ function publicState() {
     drillCost: DRILL_COST,
     parking: PARKING,
     crusher,
+    roads,
+    vehicles,
     blocks: mine.blocks.map((row) => row.map(publicBlock)),
   };
 }
@@ -132,10 +140,29 @@ app.post('/api/deliver', (req, res) => {
   res.json({ credit, pay });
 });
 
+// Persist the player-drawn road network (replaces the whole network).
+app.post('/api/roads', (req, res) => {
+  const cells = req.body && req.body.cells;
+  if (Array.isArray(cells)) {
+    roads = cells.filter((c) =>
+      Number.isInteger(c.gx) && Number.isInteger(c.gy));
+  }
+  res.json({ ok: true });
+});
+
+// Persist live vehicle positions (sent periodically by the client).
+app.post('/api/vehicles', (req, res) => {
+  const v = req.body && req.body.vehicles;
+  if (v && typeof v === 'object') vehicles = v;
+  res.json({ ok: true });
+});
+
 app.post('/api/reset', (_req, res) => {
   mine = generateMine(COLS, ROWS);
   credit = STARTING_CREDIT;
   crusher = placeCrusher();
+  roads = [];        // new mine ⇒ fresh road network and vehicle positions
+  vehicles = {};
   res.json(publicState());
 });
 
