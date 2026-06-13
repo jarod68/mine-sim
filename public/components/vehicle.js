@@ -84,14 +84,35 @@ export class Vehicle {
       const inBounds = nx >= 0 && nx < grid.zoneCols && ny >= 0 && ny < grid.zoneRows;
       // OHTs may only drive on roads (incl. parking pads).
       const onRoad = !this.roadOnly || (isRoad && isRoad(nx, ny));
-      // Never move into a cell another vehicle occupies or has reserved.
-      const free = !isFree || isFree(nx, ny, this);
+      // The WHOLE vehicle (its full footprint at the target, cab included) must
+      // be clear of other vehicles — not just its centre cell.
+      const cells = this.cellsAround(nx, ny, { dx, dy }, grid);
+      const free = !isFree || cells.every((c) => isFree(c.gx, c.gy, this));
       if (inBounds && onRoad && free) {
         this.tgx = nx;
         this.tgy = ny;
         this.moving = true;
       }
     }
+  }
+
+  // Grid cells this vehicle covers when its head is at (gx,gy) facing `dir`.
+  // Long vehicles (OHT) extend backward from the head along the heading.
+  cellsAround(gx, gy, dir, grid) {
+    const zone = Math.min(grid.zoneW, grid.zoneH);
+    const lenCells = Math.max(1, Math.round(this.len / zone));
+    const cells = [];
+    for (let i = 0; i < lenCells; i++) cells.push({ gx: gx - dir.dx * i, gy: gy - dir.dy * i });
+    return cells;
+  }
+
+  // Cells currently occupied (footprint at the current cell, plus the reserved
+  // target footprint while moving) — used by others for collision.
+  occupiedCells(grid) {
+    const dir = { dx: Math.round(Math.cos(this.heading)), dy: Math.round(Math.sin(this.heading)) };
+    const cells = this.cellsAround(this.gx, this.gy, dir, grid);
+    if (this.moving) for (const c of this.cellsAround(this.tgx, this.tgy, dir, grid)) cells.push(c);
+    return cells;
   }
 
   draw(ctx, selected) {
@@ -194,13 +215,14 @@ export class Fleet {
     if (!this.selected) this.selected = vehicle;
   }
 
-  // A cell is free if no other vehicle occupies it or has reserved it as a move
-  // target this frame.
+  // A cell is free if it is outside every other vehicle's footprint (current +
+  // reserved target), so the whole vehicle — cab included — avoids overlaps.
   _isFree(gx, gy, self) {
     for (const v of this.vehicles) {
       if (v === self) continue;
-      if (v.gx === gx && v.gy === gy) return false;
-      if (v.moving && v.tgx === gx && v.tgy === gy) return false;
+      for (const c of v.occupiedCells(this.grid)) {
+        if (c.gx === gx && c.gy === gy) return false;
+      }
     }
     return true;
   }

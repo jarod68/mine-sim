@@ -174,9 +174,12 @@ export class Roads {
       ctx.fillRect(c.gx * zoneW, c.gy * zoneH, zoneW + 0.6, zoneH + 0.6);
     }
 
-    // thin white edge lines along the outer sides of the road
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.lineWidth = Math.max(1, Math.min(zoneW, zoneH) * 0.07);
+    // edge lines along the outer sides of the road; yellow & dashed while
+    // editing, thin white otherwise.
+    const s0 = Math.min(zoneW, zoneH);
+    ctx.strokeStyle = this.editing ? 'rgba(242, 184, 28, 0.95)' : 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = Math.max(1, s0 * 0.07);
+    ctx.setLineDash(this.editing ? [s0 * 0.28, s0 * 0.22] : []);
     ctx.beginPath();
     for (const c of this.cells.values()) {
       if (c.parking) continue;
@@ -188,6 +191,7 @@ export class Roads {
       if (!this.isRoad(c.gx + 1, c.gy)) { ctx.moveTo(x + zoneW, y); ctx.lineTo(x + zoneW, y + zoneH); }
     }
     ctx.stroke();
+    ctx.setLineDash([]);
 
     // parking pads
     for (const p of this.parkings) {
