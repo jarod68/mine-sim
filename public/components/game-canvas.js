@@ -5,8 +5,9 @@
 import { COLORS } from './mine.js';
 import { applyCamera, toWorld } from './camera.js';
 
-export const VIEW_W = 2048;
-export const VIEW_H = 1440;
+// World coordinate space — must match the server (game/world.js).
+export const VIEW_W = 3553;
+export const VIEW_H = 2480;
 
 export class GameCanvas {
   constructor(canvas, mine, onBlockClick) {

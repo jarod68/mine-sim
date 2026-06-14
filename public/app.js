@@ -179,6 +179,7 @@ function setupCamera() {
 
   stage.addEventListener('wheel', (e) => {
     e.preventDefault();
+    popup.hide();   // close any open popup when the view moves
     const rect = stage.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -193,6 +194,7 @@ function setupCamera() {
   let panning = false, px = 0, py = 0;
   stage.addEventListener('mousedown', (e) => {
     if (e.button !== 2) return;
+    popup.hide();   // close any open popup when panning the map
     panning = true; px = e.clientX; py = e.clientY; e.preventDefault();
   });
   window.addEventListener('mousemove', (e) => {
@@ -209,39 +211,34 @@ function setupCamera() {
   fit();
 }
 
-// ── Asset details panel (top-left) ──
+// ── Asset details panel (top-left) — compact, fields side by side ──
 function renderAsset(v) {
   if (!v) {
-    assetEl.innerHTML = '<h2>Asset details</h2><p class="muted">No asset selected</p>';
+    assetEl.innerHTML = '<span class="atitle">Asset</span><span class="muted">No asset selected</span>';
     return;
   }
 
-  let rows = `
-    <div class="arow"><span>Model</span><b>${v.model}</b></div>
-    <div class="arow"><span>Name</span><b>${v.label}</b></div>`;
+  const item = (label, val) => `<span class="ai"><i>${label}</i><b>${val}</b></span>`;
+  let parts = [item('Model', v.model), item('Name', v.label)];
 
   if (v.type === 'oht') {
     const shovels = fleet.vehicles.filter((x) => x.type === 'excavator');
-    const options = ['<option value="">— none —</option>']
+    const options = ['<option value="">—</option>']
       .concat(shovels.map((s) =>
         `<option value="${s.label}"${s.label === v.shovel ? ' selected' : ''}>${s.label}</option>`))
       .join('');
-    rows += `
-      <div class="arow"><span>Payload</span><b>${v.payload} t</b></div>
-      <div class="arow"><span>Carrying</span><b id="asset-carry">${Math.round(v.load)} t</b></div>
-      <div class="arow"><span>Shovel</span><select id="asset-shovel">${options}</select></div>`;
+    parts.push(item('Payload', `${v.payload} t`));
+    parts.push(`<span class="ai"><i>Carrying</i><b id="asset-carry">${Math.round(v.load)} t</b></span>`);
+    parts.push(`<span class="ai"><i>Shovel</i><select id="asset-shovel">${options}</select></span>`);
   } else if (v.type === 'excavator') {
     const trucks = fleet.vehicles.filter((x) => x.type === 'oht' && x.shovel === v.label).map((x) => x.label);
-    rows += `
-      <div class="arow"><span>Bucket</span><b>${v.bucket} t</b></div>
-      <div class="arow"><span>Trucks</span><b id="asset-trucks">${trucks.join(', ') || '—'}</b></div>`;
+    parts.push(item('Bucket', `${v.bucket} t`));
+    parts.push(`<span class="ai"><i>Trucks</i><b id="asset-trucks">${trucks.join(', ') || '—'}</b></span>`);
   }
 
-  rows += `
-    <div class="arow"><span>Debug path</span>
-      <input type="checkbox" id="asset-debug"${debugOn.has(v.label) ? ' checked' : ''}></div>`;
+  parts.push(`<span class="ai"><i>Debug</i><input type="checkbox" id="asset-debug"${debugOn.has(v.label) ? ' checked' : ''}></span>`);
 
-  assetEl.innerHTML = `<h2>Asset details</h2>${rows}`;
+  assetEl.innerHTML = `<span class="atitle">Asset</span>${parts.join('')}`;
 
   const sel = assetEl.querySelector('#asset-shovel');
   if (sel) {
@@ -274,8 +271,3 @@ function updateAssetLive() {
     }
   }
 }
-
-document.getElementById('regen').addEventListener('click', () => {
-  popup.hide();
-  net.reset();   // server rebuilds and broadcasts a fresh `state`
-});
