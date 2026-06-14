@@ -1,15 +1,10 @@
-// Fleet of grid-driven vehicles, rendered top-down on an overlay layer.
-//
-// Vehicles always travel centered on the sub-zone grid (a sub-zone is a quarter
-// of a mining block): they step from one cell centre to the next, never
-// off-centre. Click a vehicle to select it (highlighted outline); only the
-// selected vehicle responds to the arrow keys. The excavator is 4× slower than
-// the light pickup.
+// Client-side fleet RENDERER. The simulation (movement, collision, autopilot)
+// runs entirely on the server; this module only draws the vehicle snapshots it
+// receives and forwards manual-driving commands. Positions are smoothed between
+// server updates by lerping toward the latest target.
 
 import { applyCamera } from './camera.js';
 import { COLORS_SOLID } from './mine.js';
-
-const BASE_SPEED = 168; // px/s for the light vehicle
 
 const KEY_DIRS = {
   ArrowUp:    [0, -1],
@@ -17,105 +12,48 @@ const KEY_DIRS = {
   ArrowLeft:  [-1, 0],
   ArrowRight: [1, 0],
 };
-// Single-direction priority when several arrows are held (4-way grid driving).
-const KEY_PRIORITY = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-
-// Per-type model + technical specs (shown in the Asset details panel).
-const SPECS = {
-  pickup:    { model: 'Light Utility Vehicle' },
-  excavator: { model: 'Liebherr R9100', bucket: 24 },
-  oht:       { model: 'Liebherr T264', payload: 240 },
-};
 
 export class Vehicle {
-  constructor({ type, label, gx, gy, len, wid }) {
-    this.type = type;
-    this.label = label;
-    this.gx = gx;            // current sub-zone cell
-    this.gy = gy;
-    this.tgx = gx;           // target cell while moving
-    this.tgy = gy;
-    this.len = len;
-    this.wid = wid;
-    this.speed = type === 'excavator' ? BASE_SPEED / 4
-      : type === 'oht' ? BASE_SPEED / 2
-      : BASE_SPEED;
-    this.roadOnly = type === 'oht';
-    const spec = SPECS[type] || {};
-    this.model = spec.model || type;
-    this.payload = spec.payload || null;
-    this.bucket = spec.bucket || null;
-    this.x = 0;              // pixel centre (set by Fleet.add once grid is known)
-    this.y = 0;
-    this.heading = 0;        // radians; 0 = facing right
-    this.moving = false;
-    this.load = 0;           // tonnes carried (OHT)
-    this.loadOre = null;     // ore type carried
-    this.task = null;        // { kind:'load'|'dump', progress } during auto wait
-    this.digging = false;    // shovel actively loading a truck (drives animation)
-    this.manual = false;     // player is driving it (keyboard) — bypass autopilot
-    this.hitR = Math.max(len, wid) * 0.72;
-    this.selR = Math.max(len, wid) * 0.62;
+  constructor(d) {
+    this.applyStatic(d);
+    this.x = d.x; this.y = d.y;          // rendered position (lerped)
+    this.tx = d.x; this.ty = d.y;        // server target
+    this.heading = d.heading || 0;
+    this.applyDynamic(d);
   }
 
-  update(dt, dir, grid, isRoad, isFree) {
-    if (this.moving) {
-      const tx = (this.tgx + 0.5) * grid.zoneW;
-      const ty = (this.tgy + 0.5) * grid.zoneH;
-      const dx = tx - this.x;
-      const dy = ty - this.y;
-      const dist = Math.hypot(dx, dy);
-      const step = this.speed * dt;
-      if (dist <= step) {
-        this.x = tx;
-        this.y = ty;
-        this.gx = this.tgx;
-        this.gy = this.tgy;
-        this.moving = false;
-      } else {
-        this.x += (dx / dist) * step;
-        this.y += (dy / dist) * step;
-      }
-    }
-
-    if (!this.moving && dir) {
-      const [dx, dy] = dir;
-      this.heading = Math.atan2(dy, dx);
-      const nx = this.gx + dx;
-      const ny = this.gy + dy;
-      const inBounds = nx >= 0 && nx < grid.zoneCols && ny >= 0 && ny < grid.zoneRows;
-      // OHTs may only drive on roads (incl. parking pads) — unless under manual
-      // control, where the player can drive anywhere, even off-road.
-      const onRoad = !this.roadOnly || this.manual || (isRoad && isRoad(nx, ny));
-      // The WHOLE vehicle (its full footprint at the target, cab included) must
-      // be clear of other vehicles — not just its centre cell.
-      const cells = this.cellsAround(nx, ny, { dx, dy }, grid);
-      const free = !isFree || cells.every((c) => isFree(c.gx, c.gy, this));
-      if (inBounds && onRoad && free) {
-        this.tgx = nx;
-        this.tgy = ny;
-        this.moving = true;
-      }
-    }
+  applyStatic(d) {
+    this.label = d.label;
+    this.type = d.type;
+    this.model = d.model;
+    this.len = d.len;
+    this.wid = d.wid;
+    this.payload = d.payload;
+    this.bucket = d.bucket;
+    this.hitR = Math.max(d.len, d.wid) * 0.72;
+    this.selR = Math.max(d.len, d.wid) * 0.62;
   }
 
-  // Grid cells this vehicle covers when its head is at (gx,gy) facing `dir`.
-  // Long vehicles (OHT) extend backward from the head along the heading.
-  cellsAround(gx, gy, dir, grid) {
-    const zone = Math.min(grid.zoneW, grid.zoneH);
-    const lenCells = Math.max(1, Math.round(this.len / zone));
-    const cells = [];
-    for (let i = 0; i < lenCells; i++) cells.push({ gx: gx - dir.dx * i, gy: gy - dir.dy * i });
-    return cells;
+  applyDynamic(d) {
+    this.gx = d.gx; this.gy = d.gy;
+    this.load = d.load;
+    this.loadOre = d.loadOre;
+    this.task = d.task;
+    this.digging = d.digging;
+    this.manual = d.manual;
+    this.shovel = d.shovel;
   }
 
-  // Cells currently occupied (footprint at the current cell, plus the reserved
-  // target footprint while moving) — used by others for collision.
-  occupiedCells(grid) {
-    const dir = { dx: Math.round(Math.cos(this.heading)), dy: Math.round(Math.sin(this.heading)) };
-    const cells = this.cellsAround(this.gx, this.gy, dir, grid);
-    if (this.moving) for (const c of this.cellsAround(this.tgx, this.tgy, dir, grid)) cells.push(c);
-    return cells;
+  // Update from a server snapshot: dynamic state now, position as a lerp target.
+  applyServer(d) {
+    this.applyDynamic(d);
+    this.tx = d.x; this.ty = d.y;
+    this.heading = d.heading;            // discrete; set directly (no spin)
+  }
+
+  lerp(k) {
+    this.x += (this.tx - this.x) * k;
+    this.y += (this.ty - this.y) * k;
   }
 
   draw(ctx, selected) {
@@ -143,8 +81,7 @@ export class Vehicle {
     } else drawPickup(ctx, this.len, this.wid);
     ctx.restore();
 
-    // payload fill % on the dump bed (upright over the bed, which sits at the
-    // rear −x of the truck; rotate the offset so it tracks the heading).
+    // payload fill % on the dump bed (upright, tracks the heading)
     if (this.type === 'oht' && this.load > 0 && this.payload) {
       const pct = Math.round((this.load / this.payload) * 100);
       const bedX = -this.len * 0.18;
@@ -191,21 +128,26 @@ export class Fleet {
     this.grid = grid;
     this.dpr = window.devicePixelRatio || 1;
     this.vehicles = [];
+    this.byLabel = new Map();
     this.selected = null;
-    this.roads = null;
-    this.autopilot = null;
-    this.selectionRect = null;   // { x, y, w, h } logical block outline
+    this.selectionRect = null;
+    this.onControl = null;        // (label, { dir }|{ release }) → POST /api/control
+    this.onSelect = null;         // (vehicle|null) → UI hook
     this.pressed = new Set();
+    this._manualLabel = null;     // label we're currently driving manually
+    this._lastKey = null;
 
     window.addEventListener('keydown', (e) => {
       if (!KEY_DIRS[e.key]) return;
       this.pressed.add(e.key);
       e.preventDefault();
+      this._emit();
     });
     window.addEventListener('keyup', (e) => {
       if (!KEY_DIRS[e.key]) return;
       this.pressed.delete(e.key);
       e.preventDefault();
+      this._emit();
     });
 
     this._last = performance.now();
@@ -222,106 +164,80 @@ export class Fleet {
     this.canvas.style.height = `${cssH}px`;
   }
 
-  setRoads(roads) {
-    this.roads = roads;
-  }
-
-  setAutopilot(autopilot) {
-    this.autopilot = autopilot;
-  }
-
-  add(vehicle) {
-    vehicle.x = (vehicle.gx + 0.5) * this.grid.zoneW;
-    vehicle.y = (vehicle.gy + 0.5) * this.grid.zoneH;
-    this.vehicles.push(vehicle);
-    if (!this.selected) this.selected = vehicle;
-  }
-
-  // A cell is free if it is outside every other vehicle's footprint (current +
-  // reserved target), so the whole vehicle — cab included — avoids overlaps.
-  _isFree(gx, gy, self) {
-    for (const v of this.vehicles) {
-      if (v === self) continue;
-      for (const c of v.occupiedCells(this.grid)) {
-        if (c.gx === gx && c.gy === gy) return false;
+  // Apply a server vehicle snapshot (creates render objects on first sync).
+  sync(list) {
+    for (const d of list) {
+      let v = this.byLabel.get(d.label);
+      if (!v) {
+        v = new Vehicle(d);
+        this.byLabel.set(d.label, v);
+        this.vehicles.push(v);
+      } else {
+        v.applyServer(d);
       }
     }
-    return true;
+    // keep `selected` reference pointing at the live object
+    if (this.selected) this.selected = this.byLabel.get(this.selected.label) || null;
   }
 
-  // Returns the vehicle (and selects it) under the given canvas point, or null.
+  // Jump every vehicle straight to its server position (used after a reset).
+  snapToTargets() {
+    for (const v of this.vehicles) { v.x = v.tx; v.y = v.ty; }
+  }
+
+  setSelected(v) {
+    if (this.selected === v) return;
+    // hand the previously-driven vehicle back to the autopilot
+    if (this._manualLabel && (!v || v.label !== this._manualLabel)) {
+      this.onControl?.(this._manualLabel, { release: true });
+      this._manualLabel = null;
+      this._lastKey = null;
+    }
+    this.selected = v;
+    this.onSelect?.(v);
+  }
+
   selectAt(px, py) {
     for (const v of this.vehicles) {
-      if (Math.hypot(px - v.x, py - v.y) <= v.hitR) {
-        this.selected = v;
-        return v;
-      }
+      if (Math.hypot(px - v.x, py - v.y) <= v.hitR) { this.setSelected(v); return v; }
     }
     return null;
   }
 
-  _currentDir(allowDiagonal) {
-    let dx = 0;
-    let dy = 0;
+  _currentDir() {
+    let dx = 0; let dy = 0;
     if (this.pressed.has('ArrowLeft')) dx -= 1;
     if (this.pressed.has('ArrowRight')) dx += 1;
     if (this.pressed.has('ArrowUp')) dy -= 1;
     if (this.pressed.has('ArrowDown')) dy += 1;
     if (dx === 0 && dy === 0) return null;
-    if (!allowDiagonal && dx !== 0 && dy !== 0) dy = 0; // single axis (4-way)
     return [dx, dy];
+  }
+
+  // Send a manual-driving command for the selected vehicle when the keys change.
+  _emit() {
+    const v = this.selected;
+    if (!v) return;
+    const dir = this._currentDir();
+    const k = dir ? dir.join(',') : 'none';
+    // only start sending once a key is actually pressed; then keep it manual
+    if (!dir && this._manualLabel !== v.label) return;
+    if (k === this._lastKey && this._manualLabel === v.label) return;
+    this.onControl?.(v.label, { dir });
+    this._manualLabel = v.label;
+    this._lastKey = k;
   }
 
   _loop(now) {
     const dt = Math.min(0.05, (now - this._last) / 1000);
     this._last = now;
-
-    // A deselected truck resumes autopilot; a deselected manual shovel stays
-    // manual (it keeps the position the player chose, no auto-relocation).
-    if (this._prevSelected && this._prevSelected !== this.selected) {
-      const prev = this._prevSelected;
-      if (prev.manual && prev.type === 'oht') {
-        prev.manual = false;
-        if (this.autopilot) this.autopilot.clearManual(prev);
-      }
-    }
-    this._prevSelected = this.selected;
-
-    // The selected vehicle may move diagonally (incl. trucks driven manually
-    // off-road); autopilot-driven trucks stay 4-way on the roads.
-    const sel = this.selected;
-    const allowDiagonal = !!sel;
-    const kbDir = sel ? this._currentDir(allowDiagonal) : null;
-    const isRoad = this.roads ? (gx, gy) => this.roads.isRoad(gx, gy) : null;
-    const isFree = (gx, gy, self) => this._isFree(gx, gy, self);
-
-    if (this.autopilot) {
-      this.autopilot.isFree = isFree;
-      this.autopilot.update(dt);
-    }
-
-    for (const v of this.vehicles) {
-      let dir = null;
-      // Driving the selected vehicle with the keyboard takes over: it switches
-      // to manual (autopilot released) and follows the arrows until deselected.
-      if (v === sel && kbDir) {
-        if (this.autopilot) this.autopilot.setManual(v);
-        v.manual = true;
-        dir = kbDir;
-      } else if (this.autopilot && this.autopilot.controls(v)) {
-        dir = this.autopilot.dirFor(v);
-      } else if (v === sel) {
-        dir = kbDir; // selected, idle (no autopilot, no keys) → hold
-      }
-      v.update(dt, dir, this.grid, isRoad, isFree);
-    }
+    const k = Math.min(1, dt * 14);           // position smoothing toward target
 
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     applyCamera(ctx, this.dpr);
 
-    // block selection outline (above the roads)
     if (this.selectionRect) {
       const r = this.selectionRect;
       ctx.strokeStyle = '#ffd83b';
@@ -329,7 +245,10 @@ export class Fleet {
       ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
 
-    for (const v of this.vehicles) v.draw(ctx, v === this.selected);
+    for (const v of this.vehicles) {
+      v.lerp(k);
+      v.draw(ctx, v === this.selected);
+    }
 
     requestAnimationFrame(this._loop);
   }

@@ -51,6 +51,13 @@ export class Roads {
     this.render();
   }
 
+  // Replace the whole drawn network with the server's canonical copy (keeps
+  // parking pads). Does NOT fire onChange — this is an inbound sync, not an edit.
+  setNetwork(cells) {
+    for (const [k, c] of [...this.cells]) if (!c.parking) this.cells.delete(k);
+    this.load(cells || []);
+  }
+
   resize(cssW, cssH) {
     this.cssW = cssW;
     this.cssH = cssH;
