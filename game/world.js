@@ -6,11 +6,15 @@
 const { generateMine, BLOCK_TONNAGE } = require('./mine');
 
 // View space shared with the client renderer (so x/y come ready to draw).
-// Map tripled in area (≈ ×√3 per side), view scaled to keep block/vehicle size.
-const VIEW_W = 3553;
-const VIEW_H = 2480;
-const COLS = 85;
-const ROWS = 62;
+// Map area ×15 of the original (×5 of the previous), view scaled to keep the
+// block/vehicle size constant.
+const VIEW_W = 7942;
+const VIEW_H = 5560;
+const COLS = 190;
+const ROWS = 139;
+
+// One crusher per ~5000 blocks on average.
+const BLOCKS_PER_CRUSHER = 5000;
 
 const STARTING_CREDIT = 100000;
 const DRILL_COST = 5000;
@@ -136,7 +140,7 @@ class Roads {
     this.grid = grid;
     this.cells = new Map();   // "gx,gy" -> { gx, gy, dir:{dx,dy}|null, parking }
     this.parkings = [];
-    this.crusher = null;
+    this.crushers = [];       // [{ x, y, w, h }]
   }
 
   isRoad(gx, gy) { return this.cells.has(rkey(gx, gy)); }
@@ -153,7 +157,7 @@ class Roads {
       for (let gx = x; gx < x + w; gx++) this._ensure(gx, gy).parking = true;
   }
 
-  setCrusher(x, y, w, h) { this.crusher = { x, y, w, h }; }
+  setCrushers(list) { this.crushers = Array.isArray(list) ? list : []; }
 
   // Replace the drawn road network (keeps parking pads intact).
   setNetwork(cells) {
@@ -195,7 +199,8 @@ class Autopilot {
     this.links = new Map();
     this.state = new Map();
     this._shovelLock = new Map();
-    this._crusherLock = null;
+    this._crusherLocks = new Map();  // crusher index → truck currently dumping
+    this._bayCache = null;           // cached crusher bay cells (key → crusher idx)
     this.shovels = new Set();
     this._shovelMove = new Map();
     this._manual = new Set();
@@ -209,7 +214,7 @@ class Autopilot {
     else {
       for (const t of this.links.keys()) t.task = null;
       this._shovelLock.clear();
-      this._crusherLock = null;
+      this._crusherLocks.clear();
       this._shovelMove.clear();
     }
   }
@@ -262,13 +267,13 @@ class Autopilot {
   _canTakeShovel(shovel, truck)  { const h = this._shovelHolder(shovel); return !h || h === truck; }
   _tryLockShovel(shovel, truck)  { if (this._canTakeShovel(shovel, truck)) { this._shovelLock.set(shovel, truck); return true; } return false; }
   _unlockShovel(shovel, truck)   { if (this._shovelLock.get(shovel) === truck) this._shovelLock.delete(shovel); }
-  _canTakeCrusher(truck)         { return !this._crusherLock || this._crusherLock === truck; }
-  _tryLockCrusher(truck)         { if (this._canTakeCrusher(truck)) { this._crusherLock = truck; return true; } return false; }
-  _unlockCrusher(truck)          { if (this._crusherLock === truck) this._crusherLock = null; }
+  _canTakeCrusher(idx, truck)    { const h = this._crusherLocks.get(idx); return !h || h === truck; }
+  _tryLockCrusher(idx, truck)    { if (this._canTakeCrusher(idx, truck)) { this._crusherLocks.set(idx, truck); return true; } return false; }
+  _unlockCrusher(idx, truck)     { if (this._crusherLocks.get(idx) === truck) this._crusherLocks.delete(idx); }
 
   _freeLocks(truck) {
     for (const [s, h] of this._shovelLock) if (h === truck) this._shovelLock.delete(s);
-    if (this._crusherLock === truck) this._crusherLock = null;
+    for (const [i, h] of this._crusherLocks) if (h === truck) this._crusherLocks.delete(i);
   }
 
   _updateShovels() {
@@ -396,12 +401,23 @@ class Autopilot {
 
   _tickToCrusher(truck, st) {
     truck.task = null;
-    const goals = this._crusherGoals();
+    const bays = this._crusherBays();           // cell key → crusher index
+    if (!bays.size) { st.phase = 'to_parking'; st.dir = null; return; }
+    const goals = new Set(bays.keys());
     const from = this._logical(truck);
-    if (!goals.size || !this._reachStatic(from, goals)) { st.phase = 'to_parking'; st.dir = null; return; }
-    const a = this._advance(truck, goals, () => this._canTakeCrusher(truck));
+    if (!this._reachStatic(from, goals)) { st.phase = 'to_parking'; st.dir = null; return; }
+    // The BFS heads to the NEAREST crusher bay; the gate prevents claiming a bay
+    // whose crusher is busy.
+    const a = this._advance(truck, goals, (nx, ny) => {
+      const idx = bays.get(key(nx, ny));
+      return idx != null && this._canTakeCrusher(idx, truck);
+    });
     if (a.arrived) {
-      if (this._tryLockCrusher(truck)) { st.phase = 'dumping'; st.timer = 0; }
+      const lc = this._logical(truck);
+      const idx = bays.get(key(lc.gx, lc.gy));
+      if (idx != null && this._tryLockCrusher(idx, truck)) {
+        st.phase = 'dumping'; st.timer = 0; st.crusherIdx = idx;
+      }
       st.dir = null; return;
     }
     st.dir = a.dir;
@@ -495,9 +511,9 @@ class Autopilot {
     truck.load = st.dumpTotal * (1 - progress);
     if (st.timer >= DUMP_TIME) {
       if (st.dumpTotal > 0) this.hooks.deliver(st.dumpOre, st.dumpTotal);
-      this._unlockCrusher(truck);
+      this._unlockCrusher(st.crusherIdx, truck);
       truck.load = 0; truck.loadOre = null; truck.task = null;
-      st.dumpTotal = null; st.dumpOre = null;
+      st.dumpTotal = null; st.dumpOre = null; st.crusherIdx = null;
       st.phase = 'to_shovel'; st.timer = 0;
     }
   }
@@ -513,18 +529,26 @@ class Autopilot {
     if (dir && gate) {
       const nx = lc.gx + dir[0];
       const ny = lc.gy + dir[1];
-      if (goals.has(key(nx, ny)) && !gate()) dir = null;
+      if (goals.has(key(nx, ny)) && !gate(nx, ny)) dir = null;
     }
     return { arrived: false, dir };
   }
 
   _shovelGoals(sb) { return this._bayCells(sb.bx * 2, sb.by * 2, sb.bx * 2 + 1, sb.by * 2 + 1); }
 
-  _crusherGoals() {
-    const cr = this.roads.crusher;
-    if (!cr) return new Set();
-    return this._bayCells(cr.x, cr.y, cr.x + cr.w - 1, cr.y + cr.h - 1);
+  // Map of every crusher bay cell key → its crusher index (cached; invalidated
+  // when the road network changes).
+  _crusherBays() {
+    if (this._bayCache) return this._bayCache;
+    const map = new Map();
+    this.roads.crushers.forEach((cr, idx) => {
+      for (const k of this._bayCells(cr.x, cr.y, cr.x + cr.w - 1, cr.y + cr.h - 1)) map.set(k, idx);
+    });
+    this._bayCache = map;
+    return map;
   }
+
+  _crusherGoals() { return new Set(this._crusherBays().keys()); }
 
   _bayCells(x0, y0, x1, y1) {
     const set = new Set();
@@ -684,21 +708,26 @@ function blockDistToParking(bx, by) {
   return Math.max(dx, dy);
 }
 
-function placeCrusher() {
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const pcx = (PARK_BLOCKS.bx0 + PARK_BLOCKS.bx1) / 2;
-  const pcy = (PARK_BLOCKS.by0 + PARK_BLOCKS.by1) / 2;
-  for (let i = 0; i < 800; i++) {
-    const dist = 2 + Math.random() * 13;
-    const ang = Math.random() * Math.PI * 2;
-    const cbx = clamp(Math.round(pcx + Math.cos(ang) * dist), 0, COLS - 1);
-    const cby = clamp(Math.round(pcy + Math.sin(ang) * dist), 0, ROWS - 1);
-    const d = blockDistToParking(cbx, cby);
-    if (d >= 2 && d <= 15) return { x: cbx * 2, y: cby * 2, w: 2, h: 2 };
+// Place `n` crushers at random across the map: never on the parking (min 3
+// blocks away) and spread apart from each other (min 6 blocks).
+function placeCrushers(n) {
+  const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+  const out = [];
+  let attempts = 0;
+  while (out.length < n && attempts++ < 8000) {
+    const cbx = randInt(0, COLS - 1);
+    const cby = randInt(0, ROWS - 1);
+    if (blockDistToParking(cbx, cby) < 3) continue;
+    let clear = true;
+    for (const c of out) {
+      const ox = c.x / 2;
+      const oy = c.y / 2;
+      if (Math.max(Math.abs(cbx - ox), Math.abs(cby - oy)) < 6) { clear = false; break; }
+    }
+    if (!clear) continue;
+    out.push({ x: cbx * 2, y: cby * 2, w: 2, h: 2 });
   }
-  const fbx = clamp(Math.round(pcx) + 8, 0, COLS - 1);
-  const fby = clamp(Math.round(pcy) + 8, 0, ROWS - 1);
-  return { x: fbx * 2, y: fby * 2, w: 2, h: 2 };
+  return out;
 }
 
 class World {
@@ -716,12 +745,12 @@ class World {
   reset() {
     this.mine = generateMine(COLS, ROWS);
     this.credit = STARTING_CREDIT;
-    this.crusher = placeCrusher();
+    this.crushers = placeCrushers(Math.ceil((COLS * ROWS) / BLOCKS_PER_CRUSHER));
     this.dirty = new Map();
 
     this.roads = new Roads(this.grid);
     this.roads.addParking(PARKING.x, PARKING.y, PARKING.w, PARKING.h);
-    this.roads.setCrusher(this.crusher.x, this.crusher.y, this.crusher.w, this.crusher.h);
+    this.roads.setCrushers(this.crushers);
 
     const zone = Math.min(this.grid.zoneW, this.grid.zoneH);
     const mk = (o) => { const v = new Vehicle(o); v.place(this.grid); return v; };
@@ -821,7 +850,10 @@ class World {
     return { block, credit: this.credit };
   }
 
-  setRoads(cells) { this.roads.setNetwork(cells); }
+  setRoads(cells) {
+    this.roads.setNetwork(cells);
+    this.autopilot._bayCache = null;   // road change → recompute crusher bays
+  }
 
   control(label, { dir, release } = {}) {
     const v = this.byLabel.get(label);
@@ -873,7 +905,7 @@ class World {
       credit: this.credit,
       drillCost: DRILL_COST,
       parking: PARKING,
-      crusher: this.crusher,
+      crushers: this.crushers,
       roads: this.roads.serialize(),
       vehicles: this.vehicles.map((v) => this._vehicle(v)),
       blocks: this.mine.blocks.map((row) => row.map((b) => this._publicBlock(b))),
