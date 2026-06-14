@@ -87,12 +87,13 @@ export class Vehicle {
       ctx.stroke();
     }
 
+    const modelTag = (this.model || '').split(' ').pop();  // e.g. "R9400", "T264"
     ctx.save();
     ctx.rotate(this.heading);
-    if (this.type === 'excavator') drawExcavator(ctx, this.len, this.wid, this.digging);
+    if (this.type === 'excavator') drawExcavator(ctx, this.len, this.wid, this.digging, modelTag);
     else if (this.type === 'oht') {
       const oreColor = this.loadOre ? COLORS_SOLID[this.loadOre] : null;
-      drawOHT(ctx, this.len, this.wid, this.load, oreColor);
+      drawOHT(ctx, this.len, this.wid, this.load, oreColor, modelTag);
     } else drawPickup(ctx, this.len, this.wid);
     ctx.restore();
 
@@ -365,7 +366,7 @@ function drawPickup(ctx, L, W) {
   ctx.shadowBlur = 0;
 }
 
-function drawExcavator(ctx, L, W, digging) {
+function drawExcavator(ctx, L, W, digging, modelTag) {
   // ── crawler tracks (aligned to travel, static) ──
   ctx.fillStyle = '#15171b';
   const tw = W * 0.26;
@@ -434,6 +435,17 @@ function drawExcavator(ctx, L, W, digging) {
   ctx.roundRect(tipX - L * 0.02, -W * 0.13, L * 0.09, W * 0.26, 1.5);
   ctx.fill(); ctx.stroke();
 
+  // tiny model name near the lower edge of the house, clear of the boom, cab,
+  // louvers and exhaust. Drawn inside the slew group so it rotates with the
+  // turret during the loading animation. (Only legible when zoomed in.)
+  if (modelTag) {
+    ctx.fillStyle = 'rgba(40, 45, 55, 0.85)';
+    ctx.font = `bold ${Math.max(2, W * 0.12).toFixed(1)}px system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(modelTag, -L * 0.04, W * 0.26);
+  }
+
   ctx.restore();
 }
 
@@ -441,7 +453,7 @@ function drawExcavator(ctx, L, W, digging) {
 //   • rear 75% of the length = dump bed (load well tinted by the carried ore),
 //   • next ~22% = the canopy ("casquette") attached to the bed, over the cab,
 //   • front 3% = the engine nose, in dark grey.
-function drawOHT(ctx, L, W, load = 0, oreColor = null) {
+function drawOHT(ctx, L, W, load = 0, oreColor = null, modelTag = null) {
   // tyres (dark), peeking out along the sides
   ctx.fillStyle = '#111317';
   const ww = W * 0.22;
@@ -493,4 +505,17 @@ function drawOHT(ctx, L, W, load = 0, oreColor = null) {
   ctx.beginPath();
   ctx.roundRect(L * 0.47, -W * 0.34, L * 0.03, W * 0.68, 1);
   ctx.fill();
+
+  // tiny model name on the canopy ("casquette"), running across it (zoom to read)
+  if (modelTag) {
+    ctx.save();
+    ctx.translate(L * 0.36, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.fillStyle = 'rgba(40, 45, 55, 0.85)';
+    ctx.font = `bold ${Math.max(2, W * 0.22).toFixed(1)}px system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(modelTag, 0, 0);
+    ctx.restore();
+  }
 }

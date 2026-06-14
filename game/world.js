@@ -35,12 +35,19 @@ const BASE_SPEED = 168; // px/s
 
 const SPECS = {
   pickup:    { model: 'Light Utility Vehicle' },
-  excavator: { model: 'Liebherr R9100', bucket: 24 },
+  excavator: { model: 'Liebherr R9400', bucket: 40 },
   oht:       { model: 'Liebherr T264', payload: 240 },
 };
 
+// Excavator reference models. `scale` multiplies the base visual size.
+const EXCAVATORS = {
+  R9400: { model: 'Liebherr R9400', bucket: 40, scale: 1.0 },
+  R9600: { model: 'Liebherr R9600', bucket: 60, scale: 1.275 },
+  R9800: { model: 'Liebherr R9800', bucket: 75, scale: 1.275 * 1.5 }, // 1.5× the R9600
+};
+
 class Vehicle {
-  constructor({ type, label, gx, gy, len, wid }) {
+  constructor({ type, label, gx, gy, len, wid, model, bucket, payload }) {
     this.type = type;
     this.label = label;
     this.gx = gx; this.gy = gy;
@@ -50,9 +57,9 @@ class Vehicle {
       : type === 'oht' ? BASE_SPEED / 2 : BASE_SPEED;
     this.roadOnly = type === 'oht';
     const spec = SPECS[type] || {};
-    this.model = spec.model || type;
-    this.payload = spec.payload || null;
-    this.bucket = spec.bucket || null;
+    this.model = model || spec.model || type;
+    this.payload = payload ?? spec.payload ?? null;
+    this.bucket = bucket ?? spec.bucket ?? null;
     this.x = 0; this.y = 0;
     this.heading = 0;
     this.moving = false;
@@ -171,11 +178,9 @@ class Roads {
 // ── Autopilot (ported, fully synchronous) ───────────────────────────────────
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-const BUCKET_TIME = 1.5;
-const BUCKETS = 10;
-const BUCKET_LOAD = 24;
-const TRUCK_CAP = 240;
-const DUMP_TIME = 5;
+const BUCKET_TIME = 1.5;          // s per bucket pass
+const TRUCK_CAP = 240;            // truck payload (t)
+const DUMP_TIME = 5;              // s to dump at the crusher
 const PARK_RECHECK = 0.4;
 
 const key = (gx, gy) => `${gx},${gy}`;
@@ -461,15 +466,19 @@ class Autopilot {
       }
       return;
     }
+    // Bucket capacity is per shovel model (R9400 = 40 t, R9600 = 60 t): a bigger
+    // bucket fills the truck in fewer passes.
+    const bload = shovel.bucket || 40;
+    const passes = Math.max(1, Math.ceil(TRUCK_CAP / bload));
     st.timer += dt;
     if (st.timer >= BUCKET_TIME) {
       st.timer -= BUCKET_TIME;
       st.bucket++;
-      truck.load = Math.min(TRUCK_CAP, truck.load + BUCKET_LOAD);
+      truck.load = Math.min(TRUCK_CAP, truck.load + bload);
       truck.loadOre = block.ore;
     }
-    truck.task = { kind: 'load', progress: Math.min(1, (st.bucket + st.timer / BUCKET_TIME) / BUCKETS) };
-    if (st.bucket >= BUCKETS || truck.load >= TRUCK_CAP) {
+    truck.task = { kind: 'load', progress: Math.min(1, (st.bucket + st.timer / BUCKET_TIME) / passes) };
+    if (st.bucket >= passes || truck.load >= TRUCK_CAP) {
       truck.load = this.hooks.mineBlock(sb.bx, sb.by, truck.load);
       this._unlockShovel(shovel, truck);
       truck.task = null;
@@ -717,14 +726,21 @@ class World {
     const mk = (o) => { const v = new Vehicle(o); v.place(this.grid); return v; };
 
     const lv  = mk({ type: 'pickup', label: 'LV01', gx: 6, gy: 8, len: zone * 0.95, wid: zone * 0.57 });
-    const hex1 = mk({ type: 'excavator', label: 'HEX01', gx: 12, gy: 12, len: zone * 1.2, wid: zone * 0.95 });
-    const hex2 = mk({ type: 'excavator', label: 'HEX02', gx: 20, gy: 16, len: zone * 1.2, wid: zone * 0.95 });
+    const exca = (label, gx, gy, m) => mk({
+      type: 'excavator', label, gx, gy,
+      len: zone * 1.2 * m.scale, wid: zone * 0.95 * m.scale,
+      model: m.model, bucket: m.bucket,
+    });
+    const hex1 = exca('HEX01', 12, 12, EXCAVATORS.R9400);
+    const hex2 = exca('HEX02', 20, 16, EXCAVATORS.R9600);  // bigger reference model
+    const hex3 = exca('HEX03', 28, 12, EXCAVATORS.R9400);
+    const hex4 = exca('HEX04', 36, 16, EXCAVATORS.R9800);  // largest reference model
     const P = PARKING;
     const oht1 = mk({ type: 'oht', label: 'OHT01', gx: P.x + 1, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
     const oht2 = mk({ type: 'oht', label: 'OHT02', gx: P.x + 3, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
     const oht3 = mk({ type: 'oht', label: 'OHT03', gx: P.x + 5, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
     const oht4 = mk({ type: 'oht', label: 'OHT04', gx: P.x + 1, gy: P.y + 1, len: zone * 1.445, wid: zone * 0.7 });
-    this.vehicles = [lv, hex1, hex2, oht1, oht2, oht3, oht4];
+    this.vehicles = [lv, hex1, hex2, hex3, hex4, oht1, oht2, oht3, oht4];
     this.byLabel = new Map(this.vehicles.map((v) => [v.label, v]));
 
     this.autopilot = new Autopilot(this.grid, this.roads, {
@@ -734,6 +750,8 @@ class World {
     });
     this.autopilot.addShovel(hex1);
     this.autopilot.addShovel(hex2);
+    this.autopilot.addShovel(hex3);
+    this.autopilot.addShovel(hex4);
     this.autopilot.assign(oht1, hex1);
     this.autopilot.assign(oht2, hex1);
     this.autopilot.assign(oht3, hex2);
