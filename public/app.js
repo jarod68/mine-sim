@@ -133,11 +133,11 @@ function refresh(state) {
   fleet.snapToTargets();
 }
 
-// ── live updates (every server tick) ──
+// ── live delta updates (≤ 15 Hz, only what changed) ──
 function onLive(data) {
-  setCredit(data.credit);
+  if (typeof data.credit === 'number') setCredit(data.credit);
   if (!fleet) return;
-  fleet.sync(data.vehicles);
+  if (data.vehicles && data.vehicles.length) fleet.applyDeltas(data.vehicles);
   if (data.blocks && data.blocks.length) {
     for (const b of data.blocks) game.mine.blocks[b.y][b.x] = b;
     game.render();
