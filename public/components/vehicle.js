@@ -44,11 +44,26 @@ export class Vehicle {
     this.shovel = d.shovel;
   }
 
-  // Update from a server snapshot: dynamic state now, position as a lerp target.
+  // Update from a full server snapshot: dynamic state now, position as a target.
   applyServer(d) {
     this.applyDynamic(d);
     this.tx = d.x; this.ty = d.y;
     this.heading = d.heading;            // discrete; set directly (no spin)
+  }
+
+  // Merge a partial delta — only the fields actually present are updated.
+  applyDelta(d) {
+    if ('gx' in d) this.gx = d.gx;
+    if ('gy' in d) this.gy = d.gy;
+    if ('x' in d) this.tx = d.x;         // position is a lerp target
+    if ('y' in d) this.ty = d.y;
+    if ('heading' in d) this.heading = d.heading;
+    if ('load' in d) this.load = d.load;
+    if ('loadOre' in d) this.loadOre = d.loadOre;
+    if ('task' in d) this.task = d.task;
+    if ('digging' in d) this.digging = d.digging;
+    if ('manual' in d) this.manual = d.manual;
+    if ('shovel' in d) this.shovel = d.shovel;
   }
 
   lerp(k) {
@@ -178,6 +193,14 @@ export class Fleet {
     }
     // keep `selected` reference pointing at the live object
     if (this.selected) this.selected = this.byLabel.get(this.selected.label) || null;
+  }
+
+  // Merge live deltas (partial per-vehicle field updates) by label.
+  applyDeltas(list) {
+    for (const d of list) {
+      const v = this.byLabel.get(d.label);
+      if (v) v.applyDelta(d);            // unknown labels resolve on next full state
+    }
   }
 
   // Jump every vehicle straight to its server position (used after a reset).

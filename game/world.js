@@ -653,6 +653,10 @@ class World {
     this.autopilot.assign(oht3, hex2);
     this.autopilot.assign(oht4, hex2);
     this.autopilot.setEnabled(true);
+
+    // Delta-broadcast baselines (last values sent to clients).
+    this._lastVeh = new Map();
+    this._lastCredit = null;
   }
 
   // ── simulation tick ──
@@ -763,16 +767,59 @@ class World {
     };
   }
 
-  // Lightweight, high-frequency snapshot: credit, all vehicles, changed blocks.
-  liveState() {
-    const blocks = [...this.dirty.values()].map((b) => this._publicBlock(b));
-    this.dirty.clear();
+  // Dynamic fields that may change tick to tick (rounded to cut float churn).
+  _vehFields(v) {
     return {
-      credit: this.credit,
-      vehicles: this.vehicles.map((v) => this._vehicle(v)),
-      blocks,
+      label: v.label,
+      x: Math.round(v.x), y: Math.round(v.y),
+      heading: Math.round(v.heading * 1000) / 1000,
+      gx: v.gx, gy: v.gy,
+      load: Math.round(v.load),
+      loadOre: v.loadOre,
+      task: v.task ? { kind: v.task.kind, progress: Math.round(v.task.progress * 100) / 100 } : null,
+      digging: v.digging,
+      manual: v.manual,
+      shovel: v.type === 'oht' ? (this.autopilot.assignedShovel(v)?.label ?? null) : null,
     };
   }
+
+  // Delta snapshot: only vehicles whose fields changed (and only those fields),
+  // credit only if it changed, plus any blocks touched since last call. Returns
+  // null when nothing changed at all, so the server can skip the frame entirely.
+  liveDelta() {
+    const vehicles = [];
+    for (const v of this.vehicles) {
+      const cur = this._vehFields(v);
+      const prev = this._lastVeh.get(v.label);
+      this._lastVeh.set(v.label, cur);
+      if (!prev) { vehicles.push(cur); continue; } // first time → send all fields
+      let d = null;
+      for (const k in cur) {
+        if (k === 'label') continue;
+        if (!fieldEq(cur[k], prev[k])) (d ||= { label: cur.label })[k] = cur[k];
+      }
+      if (d) vehicles.push(d);
+    }
+
+    const blocks = [...this.dirty.values()].map((b) => this._publicBlock(b));
+    this.dirty.clear();
+
+    const creditChanged = this.credit !== this._lastCredit;
+    this._lastCredit = this.credit;
+
+    if (!vehicles.length && !blocks.length && !creditChanged) return null;
+    const msg = { vehicles, blocks };
+    if (creditChanged) msg.credit = this.credit;
+    return msg;
+  }
+}
+
+// Equality for delta fields — scalars by ===, the task object by its contents.
+function fieldEq(a, b) {
+  if (a === b) return true;
+  if (a && b && typeof a === 'object' && typeof b === 'object')
+    return a.kind === b.kind && a.progress === b.progress;
+  return false;
 }
 
 module.exports = { World, VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST };

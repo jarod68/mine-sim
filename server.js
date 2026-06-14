@@ -53,11 +53,18 @@ wss.on('connection', (ws) => {
 });
 
 // ── simulation + broadcast loop ──
+// Physics runs at TICK_HZ; the network publishes a DELTA every NET_EVERY ticks
+// (→ NET_HZ). Delta frames carry only changed vehicles/fields and are skipped
+// entirely when nothing changed, so an idle world produces almost no traffic.
 const TICK_HZ = 30;
+const NET_EVERY = 2;            // broadcast every 2nd tick → 15 Hz
 const DT = 1 / TICK_HZ;
+let tickN = 0;
 setInterval(() => {
   world.tick(DT);
-  if (wss.clients.size) broadcast({ t: 'live', ...world.liveState() });
+  if (++tickN % NET_EVERY !== 0) return;
+  const live = world.liveDelta();        // also advances baselines / flushes dirty
+  if (live && wss.clients.size) broadcast({ t: 'live', ...live });
 }, 1000 / TICK_HZ);
 
 server.listen(PORT, () => {
