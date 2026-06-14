@@ -132,6 +132,7 @@ export class Roads {
 
   _down(e) {
     if (this.tool === 'none') return;
+    if (e.button !== 0) return;   // left button only — right button pans the map
     this.drawing = true;
     this.last = this._cellAt(e);
     if (this.tool === 'draw') this._ensure(this.last.gx, this.last.gy);

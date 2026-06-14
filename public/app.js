@@ -22,6 +22,17 @@ let drillCost = 5000;
 let blockW = 0;
 let blockH = 0;
 let built = false;
+const debugOn = new Set();   // asset labels with debug-path view enabled
+let selectedShovelLabel = null;
+
+// Tell the server which shovel is selected — a selected shovel pauses its
+// automatic relocation until deselected.
+function syncSelection(v) {
+  const next = v && v.type === 'excavator' ? v.label : null;
+  if (selectedShovelLabel && selectedShovelLabel !== next) net.select(selectedShovelLabel, false);
+  if (next && next !== selectedShovelLabel) net.select(next, true);
+  selectedShovelLabel = next;
+}
 
 net.onState = (state) => (built ? refresh(state) : build(state));
 net.onLive = (data) => onLive(data);
@@ -101,7 +112,7 @@ function build(state) {
 
   fleet = new Fleet(document.getElementById('vehicle-layer'), { w: VIEW_W, h: VIEW_H }, grid);
   fleet.onControl = (label, cmd) => net.control(label, cmd);
-  fleet.onSelect = (v) => renderAsset(v);
+  fleet.onSelect = (v) => { syncSelection(v); renderAsset(v); };
   fleet.sync(state.vehicles);
   fleet.snapToTargets();
 
@@ -142,6 +153,7 @@ function onLive(data) {
     for (const b of data.blocks) game.mine.blocks[b.y][b.x] = b;
     game.render();
   }
+  if ('debug' in data) fleet.debugPaths = data.debug;
   updateAssetLive();
 }
 
@@ -225,11 +237,25 @@ function renderAsset(v) {
       <div class="arow"><span>Trucks</span><b id="asset-trucks">${trucks.join(', ') || '—'}</b></div>`;
   }
 
+  rows += `
+    <div class="arow"><span>Debug path</span>
+      <input type="checkbox" id="asset-debug"${debugOn.has(v.label) ? ' checked' : ''}></div>`;
+
   assetEl.innerHTML = `<h2>Asset details</h2>${rows}`;
 
   const sel = assetEl.querySelector('#asset-shovel');
   if (sel) {
     sel.addEventListener('change', (e) => net.assign(v.label, e.target.value || null));
+  }
+
+  const dbg = assetEl.querySelector('#asset-debug');
+  if (dbg) {
+    dbg.addEventListener('change', (e) => {
+      const on = e.target.checked;
+      if (on) debugOn.add(v.label);
+      else { debugOn.delete(v.label); if (fleet.debugPaths) delete fleet.debugPaths[v.label]; }
+      net.debug(v.label, on);
+    });
   }
 }
 

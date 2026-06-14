@@ -193,6 +193,7 @@ class Autopilot {
     this.shovels = new Set();
     this._shovelMove = new Map();
     this._manual = new Set();
+    this._selected = new Set();   // assets a client is currently inspecting
     this.isFree = null;
   }
 
@@ -268,18 +269,26 @@ class Autopilot {
     for (const shovel of this.shovels) {
       const move = this._shovelMove.get(shovel);
       if (move) {
-        if (!shovel.moving && shovel.gx === move.gx && shovel.gy === move.gy)
-          this._shovelMove.delete(shovel);
-        continue;
+        // Re-evaluate the in-progress relocation each tick: stop on arrival, or
+        // abandon the trip if the target block lost its ore (e.g. another shovel
+        // got there first) so it re-picks a fresh destination below.
+        const arrived = !shovel.moving && shovel.gx === move.gx && shovel.gy === move.gy;
+        const tb = this.hooks.getBlock(Math.floor(move.gx / 2), Math.floor(move.gy / 2));
+        const targetHasOre = tb && tb.ore && tb.oreRemaining > 0;
+        if (arrived || !targetHasOre) this._shovelMove.delete(shovel);
+        else continue;
       }
-      if (this._manual.has(shovel)) continue;
+      // Don't auto-relocate a shovel the player is driving or inspecting.
+      if (this._manual.has(shovel) || this._selected.has(shovel)) continue;
       if (shovel.digging) continue;
       const bx = Math.floor(shovel.gx / 2);
       const by = Math.floor(shovel.gy / 2);
       const here = this.hooks.getBlock(bx, by);
-      const hasOre = here && here.explored && here.ore && here.oreRemaining > 0;
-      if (hasOre) continue;
-      const next = this._richestAdjacentOre(bx, by);
+      // Productive only on an explored block that still has ore → keep mining.
+      if (here && here.explored && here.ore && here.oreRemaining > 0) continue;
+      // Otherwise relocate +1 to an adjacent EXPLORED ore block. Relocation never
+      // reveals undrilled ground — only blocks the player has drilled qualify.
+      const next = this._bestAdjacentOre(bx, by);
       if (next) {
         this._shovelMove.set(shovel, {
           gx: next.bx * 2 + (shovel.gx % 2),
@@ -289,15 +298,29 @@ class Autopilot {
     }
   }
 
-  _richestAdjacentOre(bx, by) {
+  // Best of the 8 adjacent (orthogonal/diagonal) EXPLORED blocks that hold ore.
+  // Relocation only considers blocks the player has drilled (never reveals new
+  // ground). Priority: a block that already has a road bay (so trucks can load
+  // there) wins; ties broken by remaining ore. Returns { bx, by } or null.
+  _bestAdjacentOre(bx, by) {
     const NB = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
     let best = null;
     for (const [dx, dy] of NB) {
-      const b = this.hooks.getBlock(bx + dx, by + dy);
-      if (b && b.explored && b.ore && b.oreRemaining > 0 && (!best || b.oreRemaining > best.ore))
-        best = { bx: bx + dx, by: by + dy, ore: b.oreRemaining };
+      const nbx = bx + dx;
+      const nby = by + dy;
+      const b = this.hooks.getBlock(nbx, nby);
+      if (!(b && b.explored && b.ore && b.oreRemaining > 0)) continue;
+      const hasRoad = this._bayCells(nbx * 2, nby * 2, nbx * 2 + 1, nby * 2 + 1).size > 0;
+      const cand = { bx: nbx, by: nby, ore: b.oreRemaining, hasRoad };
+      const wins = !best || (cand.hasRoad !== best.hasRoad ? cand.hasRoad : cand.ore > best.ore);
+      if (wins) best = cand;
     }
     return best;
+  }
+
+  setSelected(v, on) {
+    if (!v) return;
+    if (on) this._selected.add(v); else this._selected.delete(v);
   }
 
   _shovelStep(shovel) {
@@ -315,11 +338,21 @@ class Autopilot {
     this.state.set(truck, { phase: 'to_shovel', dir: null, timer: 0, bucket: 0 });
   }
 
+  // The block a shovel is (or will be) working: its relocation TARGET while it
+  // is moving, otherwise its current block. Trucks aim at this so they never
+  // chase the shovel's transient position during a relocation.
+  _shovelBlock(shovel) {
+    const mv = this._shovelMove.get(shovel);
+    const gx = mv ? mv.gx : shovel.gx;
+    const gy = mv ? mv.gy : shovel.gy;
+    return { bx: Math.floor(gx / 2), by: Math.floor(gy / 2) };
+  }
+
   _tick(dt, truck, shovel) {
     const st = this.state.get(truck);
     if (!st) return;
     if (this._manual.has(truck)) { st.dir = null; return; }
-    const sb = { bx: Math.floor(shovel.gx / 2), by: Math.floor(shovel.gy / 2) };
+    const sb = this._shovelBlock(shovel);
 
     switch (st.phase) {
       case 'loading':    st.dir = null; shovel.digging = true; this._doLoad(dt, truck, shovel, sb, st); return;
@@ -370,6 +403,13 @@ class Autopilot {
 
   _tickToParking(truck, st) {
     truck.task = null;
+
+    // Re-evaluate every tick: only head to the parking if there is genuinely
+    // nothing useful to do. The instant a job becomes possible — a load to
+    // deliver, or an assigned shovel with reachable ore — redirect immediately
+    // via the shortest route instead of finishing the trip to the parking.
+    if (this._redirectIfUseful(truck, st)) return;
+
     const slot = this._parkSlot(truck);
     if (!slot) { st.dir = null; return; }
     const goals = new Set([key(slot.gx, slot.gy)]);
@@ -378,23 +418,35 @@ class Autopilot {
     st.dir = a.dir;
   }
 
+  // If the truck can do something useful right now, switch its phase and return
+  // true. Loaded → deliver at the crusher; empty → fetch ore from its shovel.
+  // Reachability ignores other vehicles so a momentary jam never blocks a redirect.
+  _redirectIfUseful(truck, st) {
+    const from = this._logical(truck);
+    if (truck.load > 0) {
+      if (this._reachStatic(from, this._crusherGoals())) {
+        this._releaseSlot(truck); st.phase = 'to_crusher'; st.dir = null; return true;
+      }
+      return false;
+    }
+    const shovel = this.links.get(truck);
+    if (!shovel) return false;
+    const sb = this._shovelBlock(shovel);
+    const block = this.hooks.getBlock(sb.bx, sb.by);
+    const hasOre = block && block.explored && block.ore && block.oreRemaining > 0;
+    if (hasOre && this._reachStatic(from, this._shovelGoals(sb))) {
+      this._releaseSlot(truck); st.phase = 'to_shovel'; st.dir = null; return true;
+    }
+    return false;
+  }
+
   _tickParked(dt, truck, shovel, sb, st) {
     st.dir = null;
     truck.task = null;
     st.timer += dt;
     if (st.timer < PARK_RECHECK) return;
     st.timer = 0;
-    const from = this._logical(truck);
-    if (truck.load > 0) {
-      if (this._reachStatic(from, this._crusherGoals())) { this._releaseSlot(truck); st.phase = 'to_crusher'; }
-      return;
-    }
-    const block = this.hooks.getBlock(sb.bx, sb.by);
-    const hasOre = block && block.explored && block.ore && block.oreRemaining > 0;
-    if (hasOre && this._reachStatic(from, this._shovelGoals(sb))) {
-      this._releaseSlot(truck);
-      st.phase = 'to_shovel';
-    }
+    this._redirectIfUseful(truck, st);   // resume the instant a job is possible
   }
 
   _doLoad(dt, truck, shovel, sb, st) {
@@ -578,6 +630,37 @@ class Autopilot {
     }
     return out;
   }
+
+  // Debug: the cells this vehicle is currently routing through and its goal
+  // cells, for on-map visualisation. Returns { path:[{gx,gy}], goals:[{gx,gy}] }.
+  debugPlan(v) {
+    // A relocating shovel: straight hop to its target block.
+    if (this._shovelMove.has(v)) {
+      const t = this._shovelMove.get(v);
+      return { path: [{ gx: v.gx, gy: v.gy }, { gx: t.gx, gy: t.gy }], goals: [{ gx: t.gx, gy: t.gy }] };
+    }
+    const st = this.state.get(v);
+    if (!st || this._manual.has(v)) return null;
+
+    let goals = null;
+    if (st.phase === 'to_shovel') {
+      const s = this.links.get(v);
+      if (s) goals = this._shovelGoals(this._shovelBlock(s));
+    } else if (st.phase === 'to_crusher') {
+      goals = this._crusherGoals();
+    } else if (st.phase === 'to_parking') {
+      const slot = this._parkSlot(v);
+      goals = slot ? new Set([key(slot.gx, slot.gy)]) : new Set();
+    }
+
+    // loading / dumping / parked → already at destination, no route to draw.
+    if (!goals || !goals.size) return { path: [{ gx: v.gx, gy: v.gy }], goals: [] };
+
+    const from = this._logical(v);
+    const path = this._pathToward(from, goals, v) || [{ gx: from.gx, gy: from.gy }];
+    const goalPts = [...goals].map((k) => { const [x, y] = k.split(','); return { gx: +x, gy: +y }; });
+    return { path: path.map((c) => ({ gx: c.gx, gy: c.gy })), goals: goalPts };
+  }
 }
 
 // ── World orchestrator ──────────────────────────────────────────────────────
@@ -657,6 +740,7 @@ class World {
     // Delta-broadcast baselines (last values sent to clients).
     this._lastVeh = new Map();
     this._lastCredit = null;
+    this._debug = new Set();   // labels with debug-path visualisation enabled
   }
 
   // ── simulation tick ──
@@ -721,8 +805,10 @@ class World {
     const v = this.byLabel.get(label);
     if (!v) return;
     if (release) {
+      // Deselecting hands any asset back to the autopilot — a shovel that was
+      // driven manually resumes its automatic relocation once released.
       v.manual = false; v.manualDir = null;
-      if (v.type === 'oht') this.autopilot.clearManual(v);
+      this.autopilot.clearManual(v);
       return;
     }
     v.manual = true;
@@ -735,6 +821,11 @@ class World {
     if (!t || t.type !== 'oht') return;
     const s = shovelLabel ? this.byLabel.get(shovelLabel) : null;
     this.autopilot.assign(t, s || null);
+  }
+
+  // A client selected/deselected an asset — a selected shovel won't auto-relocate.
+  select(label, on) {
+    this.autopilot.setSelected(this.byLabel.get(label), on);
   }
 
   // ── snapshots ──
@@ -811,6 +902,25 @@ class World {
     const msg = { vehicles, blocks };
     if (creditChanged) msg.credit = this.credit;
     return msg;
+  }
+
+  // ── debug-path visualisation ──
+  setDebug(label, on) {
+    if (on) this._debug.add(label);
+    else this._debug.delete(label);
+  }
+  hasDebug() { return this._debug.size > 0; }
+
+  // { [label]: { path:[{gx,gy}], goals:[{gx,gy}] } } for every debug-enabled asset.
+  debugPaths() {
+    const out = {};
+    for (const label of this._debug) {
+      const v = this.byLabel.get(label);
+      if (!v) continue;
+      const plan = this.autopilot.debugPlan(v);
+      if (plan) out[label] = plan;
+    }
+    return out;
   }
 }
 
