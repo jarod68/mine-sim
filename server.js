@@ -47,6 +47,8 @@ wss.on('connection', (ws) => {
       }
       case 'control': if (typeof m.label === 'string') world.control(m.label, { dir: m.dir, release: m.release }); break;
       case 'assign':  if (typeof m.truck === 'string') world.assign(m.truck, m.shovel || null); break;
+      case 'debug':   if (typeof m.label === 'string') world.setDebug(m.label, !!m.on); break;
+      case 'select':  if (typeof m.label === 'string') world.select(m.label, !!m.on); break;
       case 'reset':   world.reset(); broadcast({ t: 'state', state: world.fullState() }); break;
     }
   });
@@ -60,11 +62,22 @@ const TICK_HZ = 30;
 const NET_EVERY = 2;            // broadcast every 2nd tick → 15 Hz
 const DT = 1 / TICK_HZ;
 let tickN = 0;
+let lastDebugStr = null;
 setInterval(() => {
   world.tick(DT);
   if (++tickN % NET_EVERY !== 0) return;
+
   const live = world.liveDelta();        // also advances baselines / flushes dirty
-  if (live && wss.clients.size) broadcast({ t: 'live', ...live });
+  const debug = world.hasDebug() ? world.debugPaths() : {};
+  const debugStr = JSON.stringify(debug);
+  const debugChanged = debugStr !== lastDebugStr;
+  lastDebugStr = debugStr;
+
+  if (!wss.clients.size || (!live && !debugChanged)) return;
+  const msg = { t: 'live', vehicles: live?.vehicles || [], blocks: live?.blocks || [] };
+  if (live && 'credit' in live) msg.credit = live.credit;
+  if (debugChanged || Object.keys(debug).length) msg.debug = debug;
+  broadcast(msg);
 }, 1000 / TICK_HZ);
 
 server.listen(PORT, () => {

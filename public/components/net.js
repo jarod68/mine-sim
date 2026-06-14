@@ -54,5 +54,7 @@ export class Net {
   roads(cells)            { this._send({ t: 'roads', cells }); }
   control(label, cmd)     { this._send({ t: 'control', label, ...cmd }); }
   assign(truck, shovel)   { this._send({ t: 'assign', truck, shovel }); }
+  debug(label, on)        { this._send({ t: 'debug', label, on }); }
+  select(label, on)       { this._send({ t: 'select', label, on }); }
   reset()                 { this._send({ t: 'reset' }); }
 }

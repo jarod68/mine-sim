@@ -148,6 +148,7 @@ export class Fleet {
     this.selectionRect = null;
     this.onControl = null;        // (label, { dir }|{ release }) → POST /api/control
     this.onSelect = null;         // (vehicle|null) → UI hook
+    this.debugPaths = {};         // { label: { path:[{gx,gy}], goals:[{gx,gy}] } }
     this.pressed = new Set();
     this._manualLabel = null;     // label we're currently driving manually
     this._lastKey = null;
@@ -268,12 +269,52 @@ export class Fleet {
       ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
     }
 
+    this._drawDebug(ctx);
+
     for (const v of this.vehicles) {
       v.lerp(k);
       v.draw(ctx, v === this.selected);
     }
 
     requestAnimationFrame(this._loop);
+  }
+
+  // Debug overlay: neon-green continuous line through the planned route cells,
+  // with the destination cells outlined.
+  _drawDebug(ctx) {
+    const data = this.debugPaths;
+    if (!data) return;
+    const { zoneW, zoneH } = this.grid;
+    const s = Math.min(zoneW, zoneH);
+    const NEON = 'rgba(57, 255, 20, 0.95)';
+    for (const label in data) {
+      const plan = data[label];
+      if (!plan) continue;
+      const { path, goals } = plan;
+
+      if (path && path.length) {
+        ctx.strokeStyle = NEON;
+        ctx.lineWidth = Math.max(1.5, s * 0.16);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = NEON;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        path.forEach((c, i) => {
+          const x = (c.gx + 0.5) * zoneW;
+          const y = (c.gy + 0.5) * zoneH;
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        });
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      if (goals) {
+        ctx.strokeStyle = NEON;
+        ctx.lineWidth = 2;
+        for (const g of goals) ctx.strokeRect(g.gx * zoneW + 1, g.gy * zoneH + 1, zoneW - 2, zoneH - 2);
+      }
+    }
   }
 }
 
