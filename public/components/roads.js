@@ -15,7 +15,7 @@ export class Roads {
     this.dpr = window.devicePixelRatio || 1;
     this.cells = new Map();      // "gx,gy" -> { gx, gy, dir:{dx,dy}|null, parking }
     this.parkings = [];          // { x, y, w, h } patches (rendered distinctly)
-    this.crusher = null;         // { x, y, w, h } sub-zone footprint (not a road)
+    this.crushers = [];          // [{ x, y, w, h }] sub-zone footprints (not roads)
     this.tool = 'none';          // 'none' | 'draw' | 'erase'
     this.editing = false;        // draw or erase active → denser/highlighted arrows
     this.drawing = false;
@@ -103,10 +103,10 @@ export class Roads {
     this.render();
   }
 
-  // Crusher building (sub-zone footprint). Not a road: trucks dump from an
+  // Crusher buildings (sub-zone footprints). Not roads: trucks dump from an
   // adjacent road cell.
-  setCrusher(x, y, w, h) {
-    this.crusher = { x, y, w, h };
+  setCrushers(list) {
+    this.crushers = Array.isArray(list) ? list : [];
     this.render();
   }
 
@@ -257,12 +257,12 @@ export class Roads {
       ctx.fillText('P', x + w / 2, y + h / 2);
     }
 
-    // crusher building
-    if (this.crusher) {
-      const x = this.crusher.x * zoneW;
-      const y = this.crusher.y * zoneH;
-      const w = this.crusher.w * zoneW;
-      const h = this.crusher.h * zoneH;
+    // crusher buildings
+    for (const cr of this.crushers) {
+      const x = cr.x * zoneW;
+      const y = cr.y * zoneH;
+      const w = cr.w * zoneW;
+      const h = cr.h * zoneH;
       ctx.fillStyle = '#4a4f57';
       ctx.fillRect(x, y, w, h);
       ctx.fillStyle = '#2e3137';            // hopper

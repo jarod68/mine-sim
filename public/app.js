@@ -65,7 +65,6 @@ function setupModes() {
     for (const [m, btn] of Object.entries(btns)) btn.classList.toggle('active', m === mode);
   };
   for (const [mode, btn] of Object.entries(btns)) btn.addEventListener('click', () => setMode(mode));
-  document.getElementById('invert-dir').addEventListener('click', () => roads.invert());
   setMode('mouse');
 }
 
@@ -106,7 +105,7 @@ function build(state) {
   roads = new Roads(document.getElementById('roads-layer'), { w: VIEW_W, h: VIEW_H }, grid);
   const PARK = state.parking;
   roads.addParking(PARK.x, PARK.y, PARK.w, PARK.h);
-  roads.setCrusher(state.crusher.x, state.crusher.y, state.crusher.w, state.crusher.h);
+  roads.setCrushers(state.crushers);
   if (state.roads) roads.load(state.roads);
   roads.onChange = scheduleRoadsSave;
 
@@ -138,7 +137,7 @@ function refresh(state) {
   roads.clear();
   const PARK = state.parking;
   roads.addParking(PARK.x, PARK.y, PARK.w, PARK.h);
-  roads.setCrusher(state.crusher.x, state.crusher.y, state.crusher.w, state.crusher.h);
+  roads.setCrushers(state.crushers);
   if (state.roads) roads.load(state.roads);
   fleet.sync(state.vehicles);
   fleet.snapToTargets();
