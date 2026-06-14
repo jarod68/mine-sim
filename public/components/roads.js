@@ -134,6 +134,7 @@ export class Roads {
     if (this.tool === 'none') return;
     if (e.button !== 0) return;   // left button only — right button pans the map
     this.drawing = true;
+    this.drawAxis = null;         // axis locks in on the first deliberate movement
     this.last = this._cellAt(e);
     if (this.tool === 'draw') this._ensure(this.last.gx, this.last.gy);
     else this._eraseAt(this.last.gx, this.last.gy);
@@ -153,45 +154,53 @@ export class Roads {
     if (c && !c.parking) this.cells.delete(this.key(gx, gy)); // keep parking pads
   }
 
-  // Erase every cell between `last` and `cur` (fills gaps from fast drags).
-  _eraseLine(cur) {
-    let { gx, gy } = this.last;
-    let guard = 0;
-    while ((gx !== cur.gx || gy !== cur.gy) && guard++ < 1000) {
-      const ddx = cur.gx - gx;
-      const ddy = cur.gy - gy;
-      let dx = 0;
-      let dy = 0;
-      if (Math.abs(ddx) >= Math.abs(ddy)) dx = Math.sign(ddx);
-      else dy = Math.sign(ddy);
-      if (dx === 0 && dy === 0) break;
-      gx += dx;
-      gy += dy;
-      this._eraseAt(gx, gy);
+  // Minimum perpendicular drift (in cells) before a straight drag is allowed to
+  // turn. Higher = more forgiving of a slightly shaky pointer.
+  static TURN_THRESHOLD = 2;
+
+  _connectTo(cur) { this._drag(cur, 'draw'); }
+  _eraseLine(cur) { this._drag(cur, 'erase'); }
+
+  // Forgiving freehand: lock onto an axis and stay on it. The line only turns
+  // when the pointer drifts at least TURN_THRESHOLD cells off the line AND that
+  // perpendicular move dominates — a small wobble never creates a turn.
+  _drag(cur, mode) {
+    const gx0 = this.last.gx;
+    const gy0 = this.last.gy;
+    const ddx = cur.gx - gx0;
+    const ddy = cur.gy - gy0;
+    if (ddx === 0 && ddy === 0) return;
+    if (!this.drawAxis) this.drawAxis = Math.abs(ddx) >= Math.abs(ddy) ? 'h' : 'v';
+
+    const TH = Roads.TURN_THRESHOLD;
+    let target;
+    let turnTo = null;
+    if (this.drawAxis === 'h') {
+      if (Math.abs(ddy) >= TH && Math.abs(ddy) > Math.abs(ddx)) { target = { gx: cur.gx, gy: gy0 }; turnTo = 'v'; }
+      else target = { gx: cur.gx, gy: gy0 };          // stay on the row
+    } else {
+      if (Math.abs(ddx) >= TH && Math.abs(ddx) > Math.abs(ddy)) { target = { gx: gx0, gy: cur.gy }; turnTo = 'h'; }
+      else target = { gx: gx0, gy: cur.gy };          // stay on the column
     }
-    this.last = { gx, gy };
+
+    this._stroke(gx0, gy0, target, mode);
+    this.last = { gx: target.gx, gy: target.gy };
+    if (turnTo) { this.drawAxis = turnTo; this._drag(cur, mode); } // continue around the corner
   }
 
-  // Walk orthogonally from `last` to `cur`, setting each cell's outgoing flow
-  // toward the next one (fills gaps from fast drags).
-  _connectTo(cur) {
-    let { gx, gy } = this.last;
+  // Lay (or erase) a straight run of cells from (gx,gy) to target t.
+  _stroke(gx, gy, t, mode) {
+    const dx = Math.sign(t.gx - gx);
+    const dy = Math.sign(t.gy - gy);
+    if (dx === 0 && dy === 0) return;
     let guard = 0;
-    while ((gx !== cur.gx || gy !== cur.gy) && guard++ < 1000) {
-      const ddx = cur.gx - gx;
-      const ddy = cur.gy - gy;
-      let dx = 0;
-      let dy = 0;
-      if (Math.abs(ddx) >= Math.abs(ddy)) dx = Math.sign(ddx);
-      else dy = Math.sign(ddy);
-      if (dx === 0 && dy === 0) break;
-
-      this._ensure(gx, gy).dir = { dx, dy };
+    while ((gx !== t.gx || gy !== t.gy) && guard++ < 1000) {
+      if (mode === 'draw') this._ensure(gx, gy).dir = { dx, dy };
       gx += dx;
       gy += dy;
-      this._ensure(gx, gy);
+      if (mode === 'draw') this._ensure(gx, gy); else this._eraseAt(gx, gy);
     }
-    this.last = { gx, gy };
+    if (mode === 'draw') this._ensure(gx, gy).dir = { dx, dy }; // endpoint keeps a flow
   }
 
   // ── rendering ──
@@ -280,21 +289,71 @@ export class Roads {
     const s = Math.min(zoneW, zoneH);
     const period = this.editing ? 4 : 10; // denser while editing, sparse after
     for (const c of this.cells.values()) {
-      if (!c.dir || c.parking) continue;
-      if (this._arrowHere(c, period)) this._arrow(ctx, c, s, this.editing);
+      if (c.parking) continue;
+      if (this._isJunction(c)) {
+        // intersection: one arrow per supported exit direction (flow-respecting)
+        for (const e of this._exits(c)) this._arrowDir(ctx, c, s, e, this.editing);
+      } else if (c.dir && this._arrowHere(c, period)) {
+        this._arrow(ctx, c, s, this.editing);
+      }
     }
   }
 
-  _arrowHere(c, period) {
-    // intersection (T / X): 3+ orthogonal road neighbours
-    let nb = 0;
+  // 3+ orthogonal road neighbours → a T or X intersection.
+  _isJunction(c) {
+    let n = 0;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      if (this.isRoad(c.gx + dx, c.gy + dy)) nb++;
+      if (this.isRoad(c.gx + dx, c.gy + dy)) n++;
     }
-    if (nb >= 3) return true;
+    return n >= 3;
+  }
+
+  // Directions you may LEAVE this cell toward: a road neighbour you don't enter
+  // against its flow (same rule the server pathfinder uses). Shows every move
+  // the intersection actually supports.
+  _exits(c) {
+    const out = [];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = c.gx + dx;
+      const ny = c.gy + dy;
+      if (!this.isRoad(nx, ny)) continue;
+      const nc = this.cells.get(this.key(nx, ny));
+      const nDir = (nc && !nc.parking) ? nc.dir : null;
+      if (nDir && dx === -nDir.dx && dy === -nDir.dy) continue; // can't enter against flow
+      out.push([dx, dy]);
+    }
+    return out;
+  }
+
+  _arrowHere(c, period) {
     const inc = this._incomingDir(c);
     if (inc && (inc.dx !== c.dir.dx || inc.dy !== c.dir.dy)) return true; // turn
     return ((c.gx + c.gy) % period) === 0; // periodic marker on straights
+  }
+
+  // A short straight arrow from the cell centre toward `dir` — used to mark each
+  // supported direction at an intersection.
+  _arrowDir(ctx, c, s, dir, highlight) {
+    const cx = (c.gx + 0.5) * this.grid.zoneW;
+    const cy = (c.gy + 0.5) * this.grid.zoneH;
+    const r = s * 0.42;
+    const head = s * 0.16;
+    const start = s * 0.1;          // begin a little out so arrows don't all collide at the hub
+    ctx.save();
+    ctx.translate(cx, cy);
+    const color = highlight ? 'rgba(255, 226, 96, 0.95)' : 'rgba(120, 220, 255, 0.9)';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = Math.max(0.8, s * (highlight ? 0.075 : 0.06));
+    ctx.lineCap = 'round';
+    const ex = dir[0] * r;
+    const ey = dir[1] * r;
+    ctx.beginPath();
+    ctx.moveTo(dir[0] * start, dir[1] * start);
+    ctx.lineTo(ex - dir[0] * head * 0.6, ey - dir[1] * head * 0.6);
+    ctx.stroke();
+    this._head(ctx, ex, ey, { dx: dir[0], dy: dir[1] }, head);
+    ctx.restore();
   }
 
   // Direction of the road cell flowing INTO this one (for curved turn arrows).
