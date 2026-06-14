@@ -613,19 +613,22 @@ class Autopilot {
     return path;
   }
 
+  // Successors respecting one-way flow. The ONLY constraint is that you may not
+  // enter a cell against its arrow. A cell's own direction never restricts how
+  // you LEAVE it, so at a T or X junction every turn (and going straight) is
+  // allowed as long as the cell entered isn't taken the wrong way. U-turns are
+  // naturally blocked: the cell behind you flows toward you, so re-entering it
+  // is against its flow. Parking cells (no direction) are omnidirectional.
   _neighbors(c) {
-    const cell = this.roads.cells.get(key(c.gx, c.gy));
-    const cDir = (cell && !cell.parking) ? cell.dir : null;
     const out = [];
     for (const [dx, dy] of DIRS) {
       const nx = c.gx + dx;
       const ny = c.gy + dy;
       if (nx < 0 || ny < 0 || nx >= this.grid.zoneCols || ny >= this.grid.zoneRows) continue;
       if (!this.roads.isRoad(nx, ny)) continue;
-      if (cDir && dx === -cDir.dx && dy === -cDir.dy) continue;
       const nc = this.roads.cells.get(key(nx, ny));
       const nDir = (nc && !nc.parking) ? nc.dir : null;
-      if (nDir && dx === -nDir.dx && dy === -nDir.dy) continue;
+      if (nDir && dx === -nDir.dx && dy === -nDir.dy) continue; // never enter against the flow
       out.push({ gx: nx, gy: ny });
     }
     return out;
