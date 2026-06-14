@@ -33,39 +33,46 @@ body {
 /* ── Asset details (top-left) ── */
 .asset {
   width: max-content;        /* width adapts to the content */
-  min-width: 200px;
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 14px;                 /* fields laid out side by side */
+  white-space: nowrap;
+  overflow: hidden;          /* never a scrollbar */
   background: #20242c;
   border: 1px solid #353b45;
   border-radius: 8px;
-  padding: 6px 12px;
+  padding: 4px 12px;
   font-size: 13px;
 }
-.asset h2 {
-  margin: 0 0 4px;
-  font-size: 12px;
+.asset .atitle {
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #9aa0aa;
 }
-.asset .muted { margin: 0; color: #8b919c; }
-.asset .arow {
+.asset .muted { color: #8b919c; }
+.asset .ai {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  line-height: 1.5;
+  flex-direction: column;    /* tiny label over its value */
+  line-height: 1.15;
 }
-.asset .arow span { color: #9aa0aa; }
-.asset .arow b { font-weight: 600; }
+.asset .ai i {
+  font-style: normal;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #9aa0aa;
+}
+.asset .ai b { font-weight: 600; }
 .asset select {
   background: #2a2e36;
   color: #e8eaed;
   border: 1px solid #3a3f49;
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 13px;
+  border-radius: 5px;
+  padding: 1px 4px;
+  font-size: 12px;
 }
 
 h1 {

@@ -6,10 +6,11 @@
 const { generateMine, BLOCK_TONNAGE } = require('./mine');
 
 // View space shared with the client renderer (so x/y come ready to draw).
-const VIEW_W = 2048;
-const VIEW_H = 1440;
-const COLS = 49;
-const ROWS = 36;
+// Map tripled in area (≈ ×√3 per side), view scaled to keep block/vehicle size.
+const VIEW_W = 3553;
+const VIEW_H = 2480;
+const COLS = 85;
+const ROWS = 62;
 
 const STARTING_CREDIT = 100000;
 const DRILL_COST = 5000;

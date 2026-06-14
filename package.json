@@ -4,7 +4,8 @@
   "description": "Open-pit mine simulation — 2D grid of mining blocks",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "docker:build": "docker buildx create --name minesim-builder --driver docker-container --bootstrap --use 2>/dev/null || true && docker buildx build --builder minesim-builder --platform linux/amd64,linux/arm64 -t jarod68/mine-sim:latest --push ."
   },
   "dependencies": {
     "express": "^4.19.2",
