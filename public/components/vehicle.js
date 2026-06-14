@@ -320,6 +320,7 @@ export class Fleet {
 
 // ── top-down sprites (front toward +x) ───────────────────────────────────────
 
+// Light utility vehicle — construction yellow, with a flashing orange beacon.
 function drawPickup(ctx, L, W) {
   ctx.fillStyle = '#111317';
   const ww = W * 0.2;
@@ -330,17 +331,17 @@ function drawPickup(ctx, L, W) {
     }
   }
 
-  ctx.fillStyle = '#3b82f6';
+  ctx.fillStyle = '#f2c218';                 // body — construction yellow
   ctx.beginPath();
   ctx.roundRect(-L / 2, -W / 2, L, W, W * 0.24);
   ctx.fill();
 
-  ctx.fillStyle = '#2461bd';                 // cargo bed
+  ctx.fillStyle = '#cf9914';                 // cargo bed (darker yellow)
   ctx.beginPath();
   ctx.roundRect(-L / 2 + L * 0.05, -W * 0.34, L * 0.4, W * 0.68, 1.5);
   ctx.fill();
 
-  ctx.fillStyle = '#5b9bf7';                 // cab
+  ctx.fillStyle = '#f7d65a';                 // cab (lighter yellow)
   ctx.beginPath();
   ctx.roundRect(0, -W * 0.42, L * 0.34, W * 0.84, 1.5);
   ctx.fill();
@@ -352,6 +353,16 @@ function drawPickup(ctx, L, W) {
 
   ctx.fillStyle = '#e6ecf5';                 // bumper
   ctx.fillRect(L * 0.46, -W * 0.32, L * 0.04, W * 0.64);
+
+  // flashing orange beacon (gyrophare) on the left of the cab roof, no outline
+  const on = (performance.now() % 700) < 350;
+  const bx = L * 0.08;
+  const by = -W * 0.25;            // left side of the roof
+  const br = Math.min(L, W) * 0.14;
+  if (on) { ctx.shadowColor = 'rgba(255, 140, 0, 0.95)'; ctx.shadowBlur = 9; }
+  ctx.fillStyle = on ? '#ff9b1a' : '#7a4a12';
+  ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
 }
 
 function drawExcavator(ctx, L, W, digging) {
@@ -377,25 +388,41 @@ function drawExcavator(ctx, L, W, digging) {
   ctx.save();
   ctx.rotate(swing);
 
-  // counterweight (rear)
-  ctx.fillStyle = '#cf9914';
-  ctx.beginPath(); ctx.roundRect(-L * 0.34, -W * 0.3, L * 0.13, W * 0.6, 2); ctx.fill();
-  // house
-  ctx.fillStyle = '#f2b81c';
-  ctx.beginPath(); ctx.roundRect(-L * 0.26, -W * 0.32, L * 0.5, W * 0.64, 2); ctx.fill();
-  // cab glass
+  // counterweight (rear) — light grey, extended back almost to the track ends
+  ctx.fillStyle = '#d7dadf';
+  ctx.beginPath(); ctx.roundRect(-L * 0.48, -W * 0.32, L * 0.16, W * 0.64, 2); ctx.fill();
+  // house / turret — white, and a bit LONGER than before (closer to the real one)
+  ctx.fillStyle = '#eef0f2';
+  ctx.beginPath(); ctx.roundRect(-L * 0.34, -W * 0.34, L * 0.66, W * 0.68, 2); ctx.fill();
+  // cab glass near the front of the house
   ctx.fillStyle = '#1d2a36';
-  ctx.beginPath(); ctx.roundRect(L * 0.04, -W * 0.28, L * 0.16, W * 0.28, 1); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(L * 0.14, -W * 0.28, L * 0.16, W * 0.3, 1); ctx.fill();
 
-  // boom + stick (extend with reach)
-  const baseX = L * 0.18;
-  const tipX = L * (0.34 + 0.26 * reach);
+  // engine deck at the rear of the turret: louvers (grille) + exhaust stack
+  ctx.strokeStyle = '#9aa0aa';
+  ctx.lineWidth = Math.max(0.6, W * 0.03);
+  ctx.beginPath();
+  for (let gx = -L * 0.30; gx <= -L * 0.14; gx += L * 0.045) {
+    ctx.moveTo(gx, -W * 0.2); ctx.lineTo(gx, W * 0.2);
+  }
+  ctx.stroke();
+  // exhaust pipe (top view: dark stack with a light rim), offset to one side
+  const er = Math.min(L, W) * 0.03;
+  ctx.fillStyle = '#2c2f34';
+  ctx.beginPath(); ctx.arc(-L * 0.2, -W * 0.3, er, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#6b7077';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(-L * 0.2, -W * 0.3, er, 0, Math.PI * 2); ctx.stroke();
+
+  // boom + stick (grey), extend with reach
+  const baseX = L * 0.30;
+  const tipX = L * (0.44 + 0.26 * reach);
   const midX = (baseX + tipX) / 2;
   ctx.lineCap = 'round';
-  ctx.strokeStyle = '#e0a92a';
+  ctx.strokeStyle = '#b9bdc4';
   ctx.lineWidth = W * 0.18;
   ctx.beginPath(); ctx.moveTo(baseX, 0); ctx.lineTo(midX, 0); ctx.stroke();   // boom
-  ctx.strokeStyle = '#f2c24a';
+  ctx.strokeStyle = '#d2d5da';
   ctx.lineWidth = W * 0.12;
   ctx.beginPath(); ctx.moveTo(midX, 0); ctx.lineTo(tipX, 0); ctx.stroke();    // stick
 
@@ -410,52 +437,60 @@ function drawExcavator(ctx, L, W, digging) {
   ctx.restore();
 }
 
-// Off-highway haul truck (tomberau) — long, dump bed at the rear (−x), cab and
-// grille at the front (+x), dual rear axles. `oreColor` tints the load well with
-// the carried material's colour.
+// Off-highway haul truck (tomberau), white. Top view, front toward +x:
+//   • rear 75% of the length = dump bed (load well tinted by the carried ore),
+//   • next ~22% = the canopy ("casquette") attached to the bed, over the cab,
+//   • front 3% = the engine nose, in dark grey.
 function drawOHT(ctx, L, W, load = 0, oreColor = null) {
-  // tyres
+  // tyres (dark), peeking out along the sides
   ctx.fillStyle = '#111317';
-  const ww = W * 0.24;
-  const wl = L * 0.12;
+  const ww = W * 0.22;
+  const wl = L * 0.1;
   const axle = (ax) => {
-    for (const sy of [-W / 2 - ww * 0.08, W / 2 - ww * 0.92]) {
-      ctx.fillRect(ax - wl / 2, sy, wl, ww);
-    }
+    for (const sy of [-W / 2 - ww * 0.05, W / 2 - ww * 0.95]) ctx.fillRect(ax - wl / 2, sy, wl, ww);
   };
-  axle(L * 0.3);           // front (steer)
-  axle(-L * 0.1);          // rear dual
-  axle(-L * 0.26);
+  axle(L * 0.34);          // front
+  axle(-L * 0.06);         // rear dual
+  axle(-L * 0.24);
 
-  // dump bed (rear) with a load well that shows the carried material's colour
-  ctx.fillStyle = '#d39a26';
+  // white body
+  ctx.fillStyle = '#eef0f2';
   ctx.beginPath();
-  ctx.roundRect(-L * 0.5, -W / 2, L * 0.64, W, W * 0.18);
-  ctx.fill();
-  ctx.fillStyle = (load > 0 && oreColor) ? oreColor : '#6f5a1c';
-  ctx.beginPath();
-  ctx.roundRect(-L * 0.45, -W * 0.36, L * 0.5, W * 0.72, 2);
+  ctx.roundRect(-L * 0.5, -W / 2, L, W, W * 0.14);
   ctx.fill();
 
-  // hood / chassis (front)
-  ctx.fillStyle = '#e0a32a';
+  // dump bed (rear 75%) — load well shows the carried material's colour. Its rear
+  // edge is a blunt pyramid across the width: triangle 25% / flat 50% / triangle 25%.
+  const fX = L * 0.22;        // front of the well
+  const rFlat = -L * 0.47;    // rearmost x (the flat middle)
+  const rCorner = -L * 0.40;  // where the rear triangles meet the side walls
+  const top = -W * 0.4;
+  const bot = W * 0.4;
+  ctx.fillStyle = (load > 0 && oreColor) ? oreColor : '#c9ccd1';
   ctx.beginPath();
-  ctx.roundRect(L * 0.08, -W * 0.34, L * 0.42, W * 0.68, W * 0.12);
+  ctx.moveTo(fX, top);
+  ctx.lineTo(fX, bot);
+  ctx.lineTo(rCorner, bot);     // bottom side → start of lower triangle
+  ctx.lineTo(rFlat, W * 0.2);   // lower triangle → flat
+  ctx.lineTo(rFlat, -W * 0.2);  // flat middle (50%)
+  ctx.lineTo(rCorner, top);     // upper triangle → top side
+  ctx.closePath();
   ctx.fill();
 
-  // cab
-  ctx.fillStyle = '#f0c350';
+  // canopy / "casquette" (front ~22%) covering the cab — white
+  ctx.fillStyle = '#f7f8fa';
   ctx.beginPath();
-  ctx.roundRect(L * 0.1, -W * 0.36, L * 0.16, W * 0.72, 1.5);
+  ctx.roundRect(L * 0.25, -W * 0.46, L * 0.22, W * 0.92, W * 0.08);
+  ctx.fill();
+  // faint cab hint under the canopy
+  ctx.fillStyle = 'rgba(40, 55, 70, 0.35)';
+  ctx.beginPath();
+  ctx.roundRect(L * 0.30, -W * 0.34, L * 0.12, W * 0.68, 1);
   ctx.fill();
 
-  // windshield
-  ctx.fillStyle = '#1d2a36';
+  // engine nose — front 3%, dark grey/black
+  ctx.fillStyle = '#34373c';
   ctx.beginPath();
-  ctx.roundRect(L * 0.19, -W * 0.28, L * 0.08, W * 0.56, 1);
+  ctx.roundRect(L * 0.47, -W * 0.34, L * 0.03, W * 0.68, 1);
   ctx.fill();
-
-  // grille / lights
-  ctx.fillStyle = '#e6ecf5';
-  ctx.fillRect(L * 0.49, -W * 0.3, L * 0.03, W * 0.6);
 }

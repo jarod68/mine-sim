@@ -720,10 +720,10 @@ class World {
     const hex1 = mk({ type: 'excavator', label: 'HEX01', gx: 12, gy: 12, len: zone * 1.2, wid: zone * 0.95 });
     const hex2 = mk({ type: 'excavator', label: 'HEX02', gx: 20, gy: 16, len: zone * 1.2, wid: zone * 0.95 });
     const P = PARKING;
-    const oht1 = mk({ type: 'oht', label: 'OHT01', gx: P.x + 1, gy: P.y, len: zone * 1.7, wid: zone * 0.7 });
-    const oht2 = mk({ type: 'oht', label: 'OHT02', gx: P.x + 3, gy: P.y, len: zone * 1.7, wid: zone * 0.7 });
-    const oht3 = mk({ type: 'oht', label: 'OHT03', gx: P.x + 5, gy: P.y, len: zone * 1.7, wid: zone * 0.7 });
-    const oht4 = mk({ type: 'oht', label: 'OHT04', gx: P.x + 1, gy: P.y + 1, len: zone * 1.7, wid: zone * 0.7 });
+    const oht1 = mk({ type: 'oht', label: 'OHT01', gx: P.x + 1, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
+    const oht2 = mk({ type: 'oht', label: 'OHT02', gx: P.x + 3, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
+    const oht3 = mk({ type: 'oht', label: 'OHT03', gx: P.x + 5, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
+    const oht4 = mk({ type: 'oht', label: 'OHT04', gx: P.x + 1, gy: P.y + 1, len: zone * 1.445, wid: zone * 0.7 });
     this.vehicles = [lv, hex1, hex2, oht1, oht2, oht3, oht4];
     this.byLabel = new Map(this.vehicles.map((v) => [v.label, v]));
 
