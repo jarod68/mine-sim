@@ -169,10 +169,11 @@ class Roads {
 
   setCrushers(list) { this.crushers = Array.isArray(list) ? list : []; }
 
-  // Replace the drawn road network (keeps parking pads intact).
+  // Replace the drawn road network (keeps parking pads intact). A malformed
+  // payload is ignored — it must never wipe the existing roads.
   setNetwork(cells) {
-    for (const [k, c] of [...this.cells]) if (!c.parking) this.cells.delete(k);
     if (!Array.isArray(cells)) return;
+    for (const [k, c] of [...this.cells]) if (!c.parking) this.cells.delete(k);
     for (const c of cells) {
       if (!Number.isInteger(c.gx) || !Number.isInteger(c.gy)) continue;
       const cell = this._ensure(c.gx, c.gy);

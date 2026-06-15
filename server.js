@@ -27,6 +27,8 @@ function broadcast(obj) {
 }
 
 wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   send(ws, { t: 'state', state: world.fullState() });
 
   ws.on('message', (raw) => {
@@ -70,21 +72,42 @@ const DT = 1 / TICK_HZ;
 let tickN = 0;
 let lastDebugStr = null;
 setInterval(() => {
-  world.tick(DT);
-  if (++tickN % NET_EVERY !== 0) return;
+  // A stray error must never crash the process — that would restart the
+  // container and wipe the in-memory world (roads, credit, fleet).
+  try {
+    world.tick(DT);
+    if (++tickN % NET_EVERY !== 0) return;
 
-  const live = world.liveDelta();        // also advances baselines / flushes dirty
-  const debug = world.hasDebug() ? world.debugPaths() : {};
-  const debugStr = JSON.stringify(debug);
-  const debugChanged = debugStr !== lastDebugStr;
-  lastDebugStr = debugStr;
+    const live = world.liveDelta();      // also advances baselines / flushes dirty
+    const debug = world.hasDebug() ? world.debugPaths() : {};
+    const debugStr = JSON.stringify(debug);
+    const debugChanged = debugStr !== lastDebugStr;
+    lastDebugStr = debugStr;
 
-  if (!wss.clients.size || (!live && !debugChanged)) return;
-  const msg = { t: 'live', vehicles: live?.vehicles || [], blocks: live?.blocks || [] };
-  if (live && 'credit' in live) msg.credit = live.credit;
-  if (debugChanged || Object.keys(debug).length) msg.debug = debug;
-  broadcast(msg);
+    if (!wss.clients.size || (!live && !debugChanged)) return;
+    const msg = { t: 'live', vehicles: live?.vehicles || [], blocks: live?.blocks || [] };
+    if (live && 'credit' in live) msg.credit = live.credit;
+    if (debugChanged || Object.keys(debug).length) msg.debug = debug;
+    broadcast(msg);
+  } catch (err) {
+    console.error('[tick] error (continuing):', err);
+  }
 }, 1000 / TICK_HZ);
+
+// Heartbeat: ping clients so proxies (Traefik idle timeout) don't drop idle
+// WebSockets — otherwise the resulting reconnect churn re-syncs state needlessly.
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch { /* ignore */ }
+  }
+}, 30000);
+
+// Last-resort guards: never let a stray error/rejection kill the process and
+// thereby reset the whole game.
+process.on('uncaughtException', (e) => console.error('[uncaughtException]', e));
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
 
 server.listen(PORT, () => {
   console.log(`mine-sim running on http://localhost:${PORT}`);
