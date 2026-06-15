@@ -960,7 +960,7 @@ class World {
     v.place(this.grid);
     this.vehicles.push(v);
     this.byLabel.set(v.label, v);
-    return { ok: true, credit: this.credit, label: v.label };
+    return { ok: true, credit: this.credit, label: v.label, vehicle: this._vehicle(v) };
   }
 
   // Next free label for a prefix (OHT, HEX, LV) → e.g. "OHT05".
