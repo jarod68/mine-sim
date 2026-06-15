@@ -308,9 +308,9 @@ class Autopilot {
       const here = this.hooks.getBlock(bx, by);
       // Productive only on an explored block that still has ore → keep mining.
       if (here && here.explored && here.ore && here.oreRemaining > 0) continue;
-      // Otherwise relocate +1 to an adjacent EXPLORED ore block. Relocation never
-      // reveals undrilled ground — only blocks the player has drilled qualify.
-      const next = this._bestAdjacentOre(bx, by);
+      // Otherwise relocate to the best EXPLORED ore block within 3 blocks.
+      // Relocation never reveals undrilled ground, and never moves onto a road.
+      const next = this._bestOreInRadius(bx, by, 3);
       if (next) {
         this._shovelMove.set(shovel, {
           gx: next.bx * 2 + (shovel.gx % 2),
@@ -320,24 +320,43 @@ class Autopilot {
     }
   }
 
-  // Best of the 8 adjacent (orthogonal/diagonal) EXPLORED blocks that hold ore.
-  // Relocation only considers blocks the player has drilled (never reveals new
-  // ground). Priority: a block that already has a road bay (so trucks can load
-  // there) wins; ties broken by remaining ore. Returns { bx, by } or null.
-  _bestAdjacentOre(bx, by) {
-    const NB = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+  // Does any sub-zone of block (bx,by) sit on a road? Used to keep shovels OFF
+  // the roads when relocating.
+  _blockOnRoad(bx, by) {
+    for (let gy = by * 2; gy <= by * 2 + 1; gy++)
+      for (let gx = bx * 2; gx <= bx * 2 + 1; gx++)
+        if (this.roads.isRoad(gx, gy)) return true;
+    return false;
+  }
+
+  // Best EXPLORED ore block within `R` blocks (Chebyshev) of (bx,by) to move to.
+  // Never reveals undrilled ground and never a block that lies on a road.
+  // Priority: blocks adjacent to a road (a bay, so trucks can reach) win; then
+  // the nearest; then the richest. Returns { bx, by } or null.
+  _bestOreInRadius(bx, by, R) {
     let best = null;
-    for (const [dx, dy] of NB) {
-      const nbx = bx + dx;
-      const nby = by + dy;
-      const b = this.hooks.getBlock(nbx, nby);
-      if (!(b && b.explored && b.ore && b.oreRemaining > 0)) continue;
-      const hasRoad = this._bayCells(nbx * 2, nby * 2, nbx * 2 + 1, nby * 2 + 1).size > 0;
-      const cand = { bx: nbx, by: nby, ore: b.oreRemaining, hasRoad };
-      const wins = !best || (cand.hasRoad !== best.hasRoad ? cand.hasRoad : cand.ore > best.ore);
-      if (wins) best = cand;
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nbx = bx + dx;
+        const nby = by + dy;
+        const b = this.hooks.getBlock(nbx, nby);
+        if (!(b && b.explored && b.ore && b.oreRemaining > 0)) continue;
+        if (this._blockOnRoad(nbx, nby)) continue;       // never sit on a road
+        const hasRoad = this._bayCells(nbx * 2, nby * 2, nbx * 2 + 1, nby * 2 + 1).size > 0;
+        const dist = Math.max(Math.abs(dx), Math.abs(dy));
+        const cand = { bx: nbx, by: nby, ore: b.oreRemaining, hasRoad, dist };
+        if (!best || this._betterOreTarget(cand, best)) best = cand;
+      }
     }
     return best;
+  }
+
+  // Ranking: road access first, then proximity, then ore quantity.
+  _betterOreTarget(a, b) {
+    if (a.hasRoad !== b.hasRoad) return a.hasRoad;
+    if (a.dist !== b.dist) return a.dist < b.dist;
+    return a.ore > b.ore;
   }
 
   setSelected(v, on) {
