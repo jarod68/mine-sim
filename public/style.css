@@ -355,3 +355,70 @@ main {
 }
 .shop-buy:hover:not(:disabled) { background: #1f63c0; }
 .shop-buy:disabled { background: #3a3f49; color: #8b919c; cursor: not-allowed; }
+
+/* ── Room badge ── */
+.room-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9aa0aa;
+  background: #20242c;
+  border: 1px solid #353b45;
+  border-radius: 6px;
+  padding: 4px 8px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+/* ── Lobby (room create / join) ── */
+.lobby {
+  position: fixed;
+  inset: 0;
+  background: #0e0f12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+.lobby-card {
+  width: min(380px, 92vw);
+  background: #20242c;
+  border: 1px solid #353b45;
+  border-radius: 12px;
+  padding: 28px 26px;
+  text-align: center;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55);
+}
+.lobby-card h1 { font-size: 26px; margin: 0 0 4px; }
+.lobby-sub { color: #8b919c; font-size: 13px; margin: 0 0 22px; }
+.lobby-create {
+  width: 100%;
+  background: #2f8f5b;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lobby-create:hover { background: #267a4c; }
+.lobby-or { color: #6b7077; font-size: 12px; margin: 16px 0; letter-spacing: 0.04em; }
+.lobby-join { display: flex; gap: 8px; }
+.lobby-join input {
+  flex: 1;
+  background: #2a2e36;
+  color: #e8eaed;
+  border: 1px solid #3a3f49;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 16px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.lobby-join button {
+  background: #2c7be5; color: #fff; border: none;
+  border-radius: 8px; padding: 10px 14px; font-weight: 600; cursor: pointer;
+}
+.lobby-join button:hover { background: #1f63c0; }
+.lobby-msg { color: #e0a32a; font-size: 13px; min-height: 18px; margin-top: 14px; }

@@ -6,9 +6,12 @@
 export class Net {
   constructor() {
     this.ws = null;
+    this.room = null;        // current room code (set once joined)
     this.onState = null;     // (state) => void
     this.onLive = null;      // ({ credit, vehicles, blocks }) => void
     this.onRoads = null;     // (cells) => void  — another client edited the roads
+    this.onJoined = null;    // (code) => void
+    this.onJoinError = null; // (reason) => void
     this._pendingDrill = new Map();
     this._buyQ = [];         // FIFO resolvers for buy() acknowledgements
     this._queue = [];        // commands buffered until the socket is open
@@ -18,13 +21,20 @@ export class Net {
   _connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     this.ws = new WebSocket(`${proto}://${location.host}`);
-    this.ws.onopen = () => { for (const m of this._queue) this.ws.send(m); this._queue.length = 0; };
+    this.ws.onopen = () => {
+      // On reconnect, re-join the same room first so queued commands land in it.
+      if (this.room) this.ws.send(JSON.stringify({ t: 'join', room: this.room }));
+      for (const m of this._queue) this.ws.send(m);
+      this._queue.length = 0;
+    };
     this.ws.onmessage = (e) => this._handle(JSON.parse(e.data));
     this.ws.onclose = () => setTimeout(() => this._connect(), 800); // auto-reconnect
   }
 
   _handle(m) {
-    if (m.t === 'state') this.onState?.(m.state);
+    if (m.t === 'joined') { this.room = m.room; this.onJoined?.(m.room); }
+    else if (m.t === 'joinError') { this.onJoinError?.(m.reason); }
+    else if (m.t === 'state') this.onState?.(m.state);
     else if (m.t === 'live') this.onLive?.(m);
     else if (m.t === 'roads') this.onRoads?.(m.cells);
     else if (m.t === 'drilled') {
@@ -67,6 +77,9 @@ export class Net {
       }, 3000);
     });
   }
+
+  create()                { this._send({ t: 'create' }); }
+  join(room)              { this._send({ t: 'join', room }); }
 
   roads(cells)            { this._send({ t: 'roads', cells }); }
   control(label, cmd)     { this._send({ t: 'control', label, ...cmd }); }

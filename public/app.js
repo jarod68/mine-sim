@@ -339,3 +339,55 @@ document.getElementById('shop-btn').addEventListener('click', () => {
 });
 // close when clicking the backdrop (outside the card)
 shopEl.addEventListener('click', (e) => { if (e.target === shopEl) closeShop(); });
+
+// ── Lobby / rooms (multiplayer) ──
+const lobbyEl = document.getElementById('lobby');
+const lobbyMsg = document.getElementById('lobby-msg');
+const roomBadge = document.getElementById('room-badge');
+
+function showLobby(msg) {
+  lobbyEl.style.display = 'flex';
+  lobbyMsg.textContent = msg || '';
+}
+function hideLobby() { lobbyEl.style.display = 'none'; }
+
+net.onJoined = (code) => {
+  hideLobby();
+  roomBadge.hidden = false;
+  roomBadge.textContent = `Room ${code}`;
+  // keep the code in the URL so a refresh / shared link rejoins the same game
+  const url = new URL(location.href);
+  if (url.searchParams.get('room') !== code) {
+    url.searchParams.set('room', code);
+    history.replaceState(null, '', url);
+  }
+};
+
+net.onJoinError = (reason) => {
+  net.room = null;                          // stop auto-rejoining a dead room
+  const url = new URL(location.href);
+  url.searchParams.delete('room');
+  history.replaceState(null, '', url);
+  showLobby(reason === 'room not found' ? 'Partie introuvable.' : `Erreur: ${reason}`);
+};
+
+document.getElementById('lobby-create').addEventListener('click', () => {
+  showLobby('Création…');
+  net.create();
+});
+const codeInput = document.getElementById('lobby-code');
+const doJoin = () => {
+  const code = codeInput.value.trim().toUpperCase();
+  if (code.length < 4) { lobbyMsg.textContent = 'Entre un code valide.'; return; }
+  showLobby('Connexion…');
+  net.join(code);
+};
+document.getElementById('lobby-join-btn').addEventListener('click', doJoin);
+codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
+
+// On load: auto-join the room from the URL, otherwise show the lobby.
+(function bootstrap() {
+  const code = new URL(location.href).searchParams.get('room');
+  if (code) { showLobby('Connexion…'); net.join(code.toUpperCase()); }
+  else showLobby();
+})();
