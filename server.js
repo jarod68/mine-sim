@@ -49,6 +49,12 @@ wss.on('connection', (ws) => {
       case 'assign':  if (typeof m.truck === 'string') world.assign(m.truck, m.shovel || null); break;
       case 'debug':   if (typeof m.label === 'string') world.setDebug(m.label, !!m.on); break;
       case 'select':  if (typeof m.label === 'string') world.select(m.label, !!m.on); break;
+      case 'buy': {
+        const r = world.buyAsset(m.id);
+        send(ws, { t: 'bought', id: m.id, ...r });
+        if (r.ok) broadcast({ t: 'state', state: world.fullState() }); // everyone gets the new asset
+        break;
+      }
       case 'reset':   world.reset(); broadcast({ t: 'state', state: world.fullState() }); break;
     }
   });

@@ -51,6 +51,16 @@ const EXCAVATORS = {
   R9800: { model: 'Liebherr R9800', bucket: 75, scale: 1.275 * 1.5 }, // 1.5× the R9600
 };
 
+// Buyable assets (shop). Prices in $.
+const MAX_ASSETS = 25;
+const CATALOG = [
+  { id: 'LV',    type: 'pickup',    model: 'Light Utility Vehicle', price: 25000,  spec: 'Manual scout vehicle' },
+  { id: 'T264',  type: 'oht',       model: 'Liebherr T264',         price: 100000, spec: 'Haul truck — 240 t payload' },
+  { id: 'R9400', type: 'excavator', model: 'Liebherr R9400',        price: 400000, spec: 'Shovel — 40 t bucket' },
+  { id: 'R9600', type: 'excavator', model: 'Liebherr R9600',        price: 600000, spec: 'Shovel — 60 t bucket' },
+  { id: 'R9800', type: 'excavator', model: 'Liebherr R9800',        price: 800000, spec: 'Shovel — 75 t bucket' },
+];
+
 class Vehicle {
   constructor({ type, label, gx, gy, len, wid, model, bucket, payload }) {
     this.type = type;
@@ -708,11 +718,31 @@ function blockDistToParking(bx, by) {
   return Math.max(dx, dy);
 }
 
-// Place `n` crushers at random across the map: never on the parking (min 3
-// blocks away) and spread apart from each other (min 6 blocks).
+// Place `n` crushers: the FIRST is guaranteed ~10 blocks from the parking (so a
+// haul cycle is possible near the start); the rest are random, never on the
+// parking (min 3 blocks away) and spread apart from each other (min 6 blocks).
 function placeCrushers(n) {
   const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const out = [];
+
+  // Mandatory crusher at ~10 blocks from the parking.
+  const pcx = (PARK_BLOCKS.bx0 + PARK_BLOCKS.bx1) / 2;
+  const pcy = (PARK_BLOCKS.by0 + PARK_BLOCKS.by1) / 2;
+  for (let i = 0; i < 800; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const cbx = clamp(Math.round(pcx + Math.cos(ang) * 10), 0, COLS - 1);
+    const cby = clamp(Math.round(pcy + Math.sin(ang) * 10), 0, ROWS - 1);
+    const d = blockDistToParking(cbx, cby);
+    if (d >= 9 && d <= 11) { out.push({ x: cbx * 2, y: cby * 2, w: 2, h: 2 }); break; }
+  }
+  if (!out.length) {
+    const fbx = clamp(Math.round(pcx) + 10, 0, COLS - 1);
+    const fby = clamp(Math.round(pcy), 0, ROWS - 1);
+    out.push({ x: fbx * 2, y: fby * 2, w: 2, h: 2 });
+  }
+
+  // Fill the rest at random.
   let attempts = 0;
   while (out.length < n && attempts++ < 8000) {
     const cbx = randInt(0, COLS - 1);
@@ -882,6 +912,73 @@ class World {
     this.autopilot.setSelected(this.byLabel.get(label), on);
   }
 
+  // ── shop ──
+  // Buy and spawn an asset. Trucks/LV go onto the parking, shovels just beside
+  // it. Returns { ok, credit, label } or { error, credit }.
+  buyAsset(id) {
+    const item = CATALOG.find((c) => c.id === id);
+    if (!item) return { error: 'unknown', credit: this.credit };
+    if (this.vehicles.length >= MAX_ASSETS) return { error: 'max', credit: this.credit };
+    if (this.credit < item.price) return { error: 'credit', credit: this.credit };
+
+    this.credit -= item.price;
+    const zone = Math.min(this.grid.zoneW, this.grid.zoneH);
+    const cell = this._spawnCell(item.type);
+    let v;
+    if (item.type === 'excavator') {
+      const m = EXCAVATORS[id];
+      v = new Vehicle({
+        type: 'excavator', label: this._nextLabel('HEX'), gx: cell.gx, gy: cell.gy,
+        len: zone * 1.2 * m.scale, wid: zone * 0.95 * m.scale, model: m.model, bucket: m.bucket,
+      });
+      this.autopilot.addShovel(v);
+    } else if (item.type === 'oht') {
+      v = new Vehicle({ type: 'oht', label: this._nextLabel('OHT'), gx: cell.gx, gy: cell.gy, len: zone * 1.445, wid: zone * 0.7 });
+    } else {
+      v = new Vehicle({ type: 'pickup', label: this._nextLabel('LV'), gx: cell.gx, gy: cell.gy, len: zone * 0.95, wid: zone * 0.57 });
+    }
+    v.place(this.grid);
+    this.vehicles.push(v);
+    this.byLabel.set(v.label, v);
+    return { ok: true, credit: this.credit, label: v.label };
+  }
+
+  // Next free label for a prefix (OHT, HEX, LV) → e.g. "OHT05".
+  _nextLabel(prefix) {
+    let max = 0;
+    for (const v of this.vehicles) {
+      if (!v.label.startsWith(prefix)) continue;
+      const n = parseInt(v.label.slice(prefix.length), 10);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    return prefix + String(max + 1).padStart(2, '0');
+  }
+
+  // A free spawn cell: inside the parking for trucks/LV, just outside it for
+  // shovels (scanning outward in rings).
+  _spawnCell(type) {
+    const P = PARKING;
+    const occ = (gx, gy) => this.vehicles.some((v) => v.gx === gx && v.gy === gy);
+    if (type === 'oht' || type === 'pickup') {
+      for (let gy = P.y; gy < P.y + P.h; gy++)
+        for (let gx = P.x; gx < P.x + P.w; gx++)
+          if (!occ(gx, gy)) return { gx, gy };
+    }
+    const cx = P.x + Math.floor(P.w / 2);
+    const cy = P.y + P.h + 1;
+    for (let r = 0; r < 100; r++) {
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // ring perimeter
+          const gx = cx + dx;
+          const gy = cy + dy;
+          if (gx < 0 || gy < 0 || gx >= this.grid.zoneCols || gy >= this.grid.zoneRows) continue;
+          if (!occ(gx, gy)) return { gx, gy };
+        }
+    }
+    return { gx: P.x, gy: P.y };
+  }
+
   // ── snapshots ──
   _publicBlock(b) { return b.explored ? b : { x: b.x, y: b.y, explored: false }; }
 
@@ -906,6 +1003,8 @@ class World {
       drillCost: DRILL_COST,
       parking: PARKING,
       crushers: this.crushers,
+      catalog: CATALOG,
+      maxAssets: MAX_ASSETS,
       roads: this.roads.serialize(),
       vehicles: this.vehicles.map((v) => this._vehicle(v)),
       blocks: this.mine.blocks.map((row) => row.map((b) => this._publicBlock(b))),

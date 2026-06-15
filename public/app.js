@@ -13,6 +13,7 @@ const canvas = document.getElementById('mine');
 const creditEl = document.getElementById('credit');
 const assetEl = document.getElementById('asset-details');
 const popup = new BlockPopup(document.getElementById('popup'));
+const shopEl = document.getElementById('shop');
 
 const net = new Net();
 let game;
@@ -22,6 +23,9 @@ let drillCost = 5000;
 let blockW = 0;
 let blockH = 0;
 let built = false;
+let creditValue = 0;
+let catalog = [];
+let maxAssets = 25;
 const debugOn = new Set();   // asset labels with debug-path view enabled
 let selectedShovelLabel = null;
 
@@ -50,7 +54,10 @@ function paintLegend() {
 }
 
 function setCredit(c) {
-  if (typeof c === 'number') creditEl.textContent = `$${c.toLocaleString('en-US')}`;
+  if (typeof c !== 'number') return;
+  creditValue = c;
+  creditEl.textContent = `$${c.toLocaleString('en-US')}`;
+  if (!shopEl.hidden) renderShop();   // keep the open shop in sync
 }
 
 function setupModes() {
@@ -93,6 +100,8 @@ function build(state) {
   built = true;
   paintLegend();
   drillCost = state.drillCost;
+  catalog = state.catalog || [];
+  maxAssets = state.maxAssets || 25;
   setCredit(state.credit);
   game = new GameCanvas(canvas, state, onBlockClick);
   blockW = VIEW_W / state.cols;
@@ -129,10 +138,11 @@ function build(state) {
   setupCamera();
 }
 
-// ── subsequent full state (after reset) → refresh data ──
+// ── subsequent full state (after reset or a purchase) → refresh data ──
 function refresh(state) {
   drillCost = state.drillCost;
-  setCredit(state.credit);
+  catalog = state.catalog || catalog;
+  maxAssets = state.maxAssets || maxAssets;
   game.setMine(state);
   roads.clear();
   const PARK = state.parking;
@@ -140,6 +150,7 @@ function refresh(state) {
   roads.setCrushers(state.crushers);
   if (state.roads) roads.load(state.roads);
   fleet.sync(state.vehicles);
+  setCredit(state.credit);   // last → refreshes the open shop with the new count
   fleet.snapToTargets();
 }
 
@@ -270,3 +281,61 @@ function updateAssetLive() {
     }
   }
 }
+
+// ── Shop (buy assets) ──
+const money = (n) => `$${n.toLocaleString('en-US')}`;
+
+function openShop() { shopEl.hidden = false; renderShop(); }
+function closeShop() { shopEl.hidden = true; }
+
+function renderShop() {
+  const count = fleet ? fleet.vehicles.length : 0;
+  const full = count >= maxAssets;
+  const rows = catalog.map((c) => {
+    const afford = creditValue >= c.price;
+    const disabled = full || !afford;
+    const reason = full ? 'Fleet full' : !afford ? 'Not enough $' : 'Buy';
+    return `
+      <div class="shop-row">
+        <div class="shop-info">
+          <b>${c.model}</b>
+          <span class="shop-spec">${c.spec}</span>
+        </div>
+        <div class="shop-price">${money(c.price)}</div>
+        <button class="shop-buy" data-id="${c.id}"${disabled ? ' disabled' : ''}>${reason}</button>
+      </div>`;
+  }).join('');
+
+  shopEl.innerHTML = `
+    <div class="shop-card">
+      <header class="shop-head">
+        <span>Buy assets</span>
+        <span class="shop-meta">${count}/${maxAssets} assets · ${money(creditValue)}</span>
+        <button class="shop-close" aria-label="Close">×</button>
+      </header>
+      ${rows}
+    </div>`;
+
+  shopEl.querySelector('.shop-close').addEventListener('click', closeShop);
+  for (const btn of shopEl.querySelectorAll('.shop-buy')) {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const r = await net.buy(btn.dataset.id);
+      if (r && r.ok) setCredit(r.credit);          // new asset arrives via the broadcast state
+      else if (r && r.error === 'credit') flashShop('Not enough credit');
+      else if (r && r.error === 'max') flashShop('Maximum 25 assets reached');
+      renderShop();
+    });
+  }
+}
+
+function flashShop(msg) {
+  const head = shopEl.querySelector('.shop-meta');
+  if (head) { head.textContent = msg; }
+}
+
+document.getElementById('shop-btn').addEventListener('click', () => {
+  if (shopEl.hidden) openShop(); else closeShop();
+});
+// close when clicking the backdrop (outside the card)
+shopEl.addEventListener('click', (e) => { if (e.target === shopEl) closeShop(); });
