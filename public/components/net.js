@@ -10,6 +10,7 @@ export class Net {
     this.onLive = null;      // ({ credit, vehicles, blocks }) => void
     this.onRoads = null;     // (cells) => void  — another client edited the roads
     this._pendingDrill = new Map();
+    this._buyQ = [];         // FIFO resolvers for buy() acknowledgements
     this._queue = [];        // commands buffered until the socket is open
     this._connect();
   }
@@ -31,6 +32,10 @@ export class Net {
       const r = this._pendingDrill.get(k);
       if (r) { this._pendingDrill.delete(k); r(m); }
     }
+    else if (m.t === 'bought') {
+      const r = this._buyQ.shift();
+      if (r) r(m);
+    }
   }
 
   _send(o) {
@@ -47,6 +52,18 @@ export class Net {
       this._send({ t: 'drill', x, y });
       setTimeout(() => {
         if (this._pendingDrill.has(k)) { this._pendingDrill.delete(k); resolve(null); }
+      }, 3000);
+    });
+  }
+
+  // Buy an asset; resolves with { ok, credit, label } or { error, credit }.
+  buy(id) {
+    return new Promise((resolve) => {
+      this._buyQ.push(resolve);
+      this._send({ t: 'buy', id });
+      setTimeout(() => {
+        const i = this._buyQ.indexOf(resolve);
+        if (i >= 0) { this._buyQ.splice(i, 1); resolve(null); }
       }, 3000);
     });
   }
