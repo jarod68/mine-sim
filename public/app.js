@@ -144,11 +144,11 @@ function refresh(state) {
   catalog = state.catalog || catalog;
   maxAssets = state.maxAssets || maxAssets;
   game.setMine(state);
-  roads.clear();
-  const PARK = state.parking;
-  roads.addParking(PARK.x, PARK.y, PARK.w, PARK.h);
   roads.setCrushers(state.crushers);
-  if (state.roads) roads.load(state.roads);
+  // Reload the server's road network WITHOUT firing onChange — a server-driven
+  // refresh (reconnect, purchase) must never echo roads back (and never wipe
+  // them). setNetwork keeps the parking pads intact.
+  roads.setNetwork(state.roads || []);
   fleet.sync(state.vehicles);
   setCredit(state.credit);   // last → refreshes the open shop with the new count
   fleet.snapToTargets();
