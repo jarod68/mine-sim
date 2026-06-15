@@ -9,6 +9,7 @@
 <body>
   <header class="topbar">
     <div id="asset-details" class="asset"></div>
+    <span id="room-badge" class="room-badge" hidden></span>
     <div class="credit" id="credit">$0</div>
     <button id="shop-btn" class="shop-btn">🛒 Buy assets</button>
     <div class="tools">
@@ -36,6 +37,20 @@
   </main>
 
   <div id="shop" class="shop-modal" hidden></div>
+
+  <div id="lobby" class="lobby">
+    <div class="lobby-card">
+      <h1>⛏ Mine Sim</h1>
+      <p class="lobby-sub">Open-pit mine simulation — multiplayer</p>
+      <button id="lobby-create" class="lobby-create">Créer une partie</button>
+      <div class="lobby-or">— ou rejoindre —</div>
+      <div class="lobby-join">
+        <input id="lobby-code" placeholder="CODE" maxlength="5" autocomplete="off" />
+        <button id="lobby-join-btn">Rejoindre</button>
+      </div>
+      <div id="lobby-msg" class="lobby-msg"></div>
+    </div>
+  </div>
 
   <p class="hint">Scroll to zoom, hold right-click to pan. Click a block to drill, click a vehicle for details. Drive with arrow keys (diagonals for light vehicles); haul trucks run automatically.</p>
 
