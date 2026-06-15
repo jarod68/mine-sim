@@ -41,6 +41,11 @@ function syncSelection(v) {
 net.onState = (state) => (built ? refresh(state) : build(state));
 net.onLive = (data) => onLive(data);
 net.onRoads = (cells) => { if (roads) roads.setNetwork(cells); };
+net.onVehicle = (v) => {           // a newly bought asset (no full-state reload)
+  if (!fleet || !v) return;
+  fleet.sync([v]);
+  if (!shopEl.hidden) renderShop();
+};
 
 // ── helpers ──
 function paintLegend() {
@@ -92,7 +97,14 @@ const onBlockClick = (block, pos) => {
 let roadsSaveTimer = null;
 function scheduleRoadsSave() {
   clearTimeout(roadsSaveTimer);
-  roadsSaveTimer = setTimeout(() => net.roads(roads.serialize()), 250);
+  roadsSaveTimer = setTimeout(() => { roadsSaveTimer = null; net.roads(roads.serialize()); }, 250);
+}
+// Send a pending road edit right now (used before a server state could clobber it).
+function flushRoadsSave() {
+  if (!roadsSaveTimer) return;
+  clearTimeout(roadsSaveTimer);
+  roadsSaveTimer = null;
+  net.roads(roads.serialize());
 }
 
 // ── first full state → build everything once ──
@@ -145,10 +157,11 @@ function refresh(state) {
   maxAssets = state.maxAssets || maxAssets;
   game.setMine(state);
   roads.setCrushers(state.crushers);
-  // Reload the server's road network WITHOUT firing onChange — a server-driven
-  // refresh (reconnect, purchase) must never echo roads back (and never wipe
-  // them). setNetwork keeps the parking pads intact.
-  roads.setNetwork(state.roads || []);
+  // Reload the server's road network WITHOUT firing onChange. But if we have a
+  // local road edit not yet confirmed, keep ours and push it instead — a
+  // server state must never clobber an in-progress drawing.
+  if (roadsSaveTimer) flushRoadsSave();
+  else roads.setNetwork(state.roads || []);
   fleet.sync(state.vehicles);
   setCredit(state.credit);   // last → refreshes the open shop with the new count
   fleet.snapToTargets();

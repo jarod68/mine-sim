@@ -12,6 +12,7 @@ export class Net {
     this.onRoads = null;     // (cells) => void  — another client edited the roads
     this.onJoined = null;    // (code) => void
     this.onJoinError = null; // (reason) => void
+    this.onVehicle = null;   // (vehicle) => void  — a new asset was bought
     this._pendingDrill = new Map();
     this._buyQ = [];         // FIFO resolvers for buy() acknowledgements
     this._queue = [];        // commands buffered until the socket is open
@@ -37,6 +38,7 @@ export class Net {
     else if (m.t === 'state') this.onState?.(m.state);
     else if (m.t === 'live') this.onLive?.(m);
     else if (m.t === 'roads') this.onRoads?.(m.cells);
+    else if (m.t === 'vehicle') this.onVehicle?.(m.vehicle);
     else if (m.t === 'drilled') {
       const k = `${m.x},${m.y}`;
       const r = this._pendingDrill.get(k);

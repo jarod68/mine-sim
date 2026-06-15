@@ -50,6 +50,7 @@ function joinRoom(ws, room) {
   room.emptySince = null;
   send(ws, { t: 'joined', room: room.code });
   send(ws, { t: 'state', state: room.world.fullState() });
+  console.log(`[join] room=${room.code} clients=${room.clients.size} roads=${room.world.roads.serialize().length}`);
 }
 
 function leaveRoom(ws) {
@@ -58,6 +59,7 @@ function leaveRoom(ws) {
   room.clients.delete(ws);
   ws.room = null;
   if (room.clients.size === 0) room.emptySince = Date.now();
+  console.log(`[leave] room=${room.code} clients=${room.clients.size}`);
 }
 
 // ── Connection / message routing ──────────────────────────────────────────────
@@ -94,7 +96,15 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'roads': {
+        const before = world.roads.serialize().length;
+        const incoming = Array.isArray(m.cells) ? m.cells.length : -1;
         world.setRoads(m.cells);
+        const after = world.roads.serialize().length;
+        if (before > 0 && after === 0) {
+          console.warn(`[roads] WIPED room=${room.code} clients=${room.clients.size} before=${before} incoming=${incoming}`);
+        } else {
+          console.log(`[roads] room=${room.code} ${before}->${after} (incoming=${incoming})`);
+        }
         const out = JSON.stringify({ t: 'roads', cells: world.roads.serialize() });
         for (const c of room.clients) if (c !== ws && c.readyState === c.OPEN) c.send(out);
         break;
@@ -105,11 +115,14 @@ wss.on('connection', (ws) => {
       case 'select':  if (typeof m.label === 'string') world.select(m.label, !!m.on); break;
       case 'buy': {
         const r = world.buyAsset(m.id);
-        send(ws, { t: 'bought', id: m.id, ...r });
-        if (r.ok) roomBroadcast(room, { t: 'state', state: world.fullState() });
+        send(ws, { t: 'bought', id: m.id, ok: r.ok, error: r.error, credit: r.credit, label: r.label });
+        // Broadcast ONLY the new vehicle (not a full state) so a purchase never
+        // reloads/clobbers the roads on other clients. Credit propagates via live.
+        if (r.ok) roomBroadcast(room, { t: 'vehicle', vehicle: r.vehicle });
+        console.log(`[buy] room=${room.code} id=${m.id} ok=${!!r.ok}`);
         break;
       }
-      case 'reset': world.reset(); roomBroadcast(room, { t: 'state', state: world.fullState() }); break;
+      case 'reset': world.reset(); roomBroadcast(room, { t: 'state', state: world.fullState() }); console.log(`[reset] room=${room.code}`); break;
     }
   });
 
@@ -149,7 +162,11 @@ setInterval(() => {
 // Heartbeat: keep WebSockets alive through proxies (Traefik idle timeout).
 setInterval(() => {
   for (const ws of wss.clients) {
-    if (ws.isAlive === false) { ws.terminate(); continue; }
+    if (ws.isAlive === false) {
+      console.warn(`[hb] terminating unresponsive ws (room=${ws.room?.code ?? '-'})`);
+      ws.terminate();
+      continue;
+    }
     ws.isAlive = false;
     try { ws.ping(); } catch { /* ignore */ }
   }
@@ -161,6 +178,7 @@ setInterval(() => {
   for (const [code, room] of rooms) {
     if (room.clients.size === 0 && room.emptySince && now - room.emptySince > ROOM_GRACE_MS) {
       rooms.delete(code);
+      console.log(`[reap] room=${code} (empty > grace)`);
     }
   }
 }, 60000);
