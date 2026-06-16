@@ -67,6 +67,9 @@ class Vehicle {
     this.label = label;
     this.gx = gx; this.gy = gy;
     this.tgx = gx; this.tgy = gy;
+    // The cell physically left on the current/last move — used by the autopilot
+    // to forbid immediate U-turns (anti-oscillation).
+    this.fromGx = gx; this.fromGy = gy;
     this.len = len; this.wid = wid;
     this.speed = type === 'excavator' ? BASE_SPEED / 4
       : type === 'oht' ? BASE_SPEED / 2 : BASE_SPEED;
@@ -119,6 +122,7 @@ class Vehicle {
       const cells = this.cellsAround(nx, ny, { dx, dy }, grid);
       const free = !isFree || cells.every((c) => isFree(c.gx, c.gy, this));
       if (inBounds && onRoad && free) {
+        this.fromGx = this.gx; this.fromGy = this.gy;
         this.tgx = nx; this.tgy = ny;
         this.moving = true;
       }
@@ -199,6 +203,13 @@ const TRUCK_CAP = 240;            // truck payload (t)
 const DUMP_TIME = 5;              // s to dump at the crusher
 const PARK_RECHECK = 0.4;
 
+// Anti-jam timers (in ticks). When a truck cannot make forward progress because
+// another vehicle blocks the shortest step, it waits a few ticks, then is allowed
+// to take a longer sideways detour, and finally (deadlock) to reverse one cell to
+// yield. Thresholds keep this from degenerating into back-and-forth jitter.
+const STUCK_DETOUR = 5;           // ticks a truck waits for a blocked shortest step before detouring
+const DIST_CACHE_MAX = 64;        // cap distinct cached distance fields
+
 const key = (gx, gy) => `${gx},${gy}`;
 
 class Autopilot {
@@ -212,6 +223,8 @@ class Autopilot {
     this._shovelLock = new Map();
     this._crusherLocks = new Map();  // crusher index → truck currently dumping
     this._bayCache = null;           // cached crusher bay cells (key → crusher idx)
+    this._distCache = new Map();     // goal-set id → distance field (cleared on road change)
+    this._rank = new Map();          // truck → stable priority (first-seen order)
     this.shovels = new Set();
     this._shovelMove = new Map();
     this._manual = new Set();
@@ -243,7 +256,7 @@ class Autopilot {
     if (!this._manual.has(v)) return;
     this._manual.delete(v);
     const st = this.state.get(v);
-    if (st) { st.phase = v.load > 0 ? 'to_crusher' : 'to_shovel'; st.dir = null; st.timer = 0; }
+    if (st) { st.phase = v.load > 0 ? 'to_crusher' : 'to_shovel'; st.dir = null; st.timer = 0; st.stuck = 0; st.yield = null; }
   }
 
   isManual(v) { return this._manual.has(v); }
@@ -271,6 +284,10 @@ class Autopilot {
     if (!this.enabled) return;
     for (const s of this.shovels) s.digging = false;
     for (const [truck, shovel] of this.links) this._tick(dt, truck, shovel);
+    // Resolve head-on deadlocks once every truck has picked a direction.
+    const dirOf = new Map();
+    for (const [truck, st] of this.state) dirOf.set(truck, st.dir);
+    this._resolveDeadlocks(dirOf);
     this._updateShovels();
   }
 
@@ -376,7 +393,7 @@ class Autopilot {
 
   _ensure(truck) {
     if (!this.links.has(truck) || this.state.get(truck)) return;
-    this.state.set(truck, { phase: 'to_shovel', dir: null, timer: 0, bucket: 0 });
+    this.state.set(truck, { phase: 'to_shovel', dir: null, timer: 0, bucket: 0, stuck: 0, want: null, yield: null });
   }
 
   // The block a shovel is (or will be) working: its relocation TARGET while it
@@ -392,7 +409,9 @@ class Autopilot {
   _tick(dt, truck, shovel) {
     const st = this.state.get(truck);
     if (!st) return;
-    if (this._manual.has(truck)) { st.dir = null; return; }
+    st.want = null;   // recomputed by _advance; cleared so the resolver ignores idle trucks
+    if (this._manual.has(truck)) { st.dir = null; st.yield = null; return; }
+    if (st.yield) { st.dir = this._yieldStep(truck, st); return; }
     const sb = this._shovelBlock(shovel);
 
     switch (st.phase) {
@@ -416,12 +435,13 @@ class Autopilot {
       st.dir = null; return;
     }
     const goals = this._shovelGoals(sb);
+    const gid = `S:${sb.bx},${sb.by}`;
     const from = this._logical(truck);
-    if (!goals.size || !this._reachStatic(from, goals)) {
+    if (!goals.size || !this._reachStatic(from, goals, gid)) {
       st.phase = truck.load > 0 ? 'to_crusher' : 'to_parking';
       st.dir = null; return;
     }
-    const a = this._advance(truck, goals, () => this._canTakeShovel(shovel, truck));
+    const a = this._advance(truck, goals, gid, () => this._canTakeShovel(shovel, truck));
     if (a.arrived) {
       if (this._tryLockShovel(shovel, truck)) { st.phase = 'loading'; st.timer = 0; st.bucket = 0; truck.load = 0; }
       st.dir = null; return;
@@ -435,10 +455,10 @@ class Autopilot {
     if (!bays.size) { st.phase = 'to_parking'; st.dir = null; return; }
     const goals = new Set(bays.keys());
     const from = this._logical(truck);
-    if (!this._reachStatic(from, goals)) { st.phase = 'to_parking'; st.dir = null; return; }
-    // The BFS heads to the NEAREST crusher bay; the gate prevents claiming a bay
+    if (!this._reachStatic(from, goals, 'C')) { st.phase = 'to_parking'; st.dir = null; return; }
+    // The field heads to the NEAREST crusher bay; the gate prevents claiming a bay
     // whose crusher is busy.
-    const a = this._advance(truck, goals, (nx, ny) => {
+    const a = this._advance(truck, goals, 'C', (nx, ny) => {
       const idx = bays.get(key(nx, ny));
       return idx != null && this._canTakeCrusher(idx, truck);
     });
@@ -465,7 +485,7 @@ class Autopilot {
     const slot = this._parkSlot(truck);
     if (!slot) { st.dir = null; return; }
     const goals = new Set([key(slot.gx, slot.gy)]);
-    const a = this._advance(truck, goals, null);
+    const a = this._advance(truck, goals, `P:${slot.gx},${slot.gy}`, null);
     if (a.arrived) { st.phase = 'parked'; st.timer = 0; st.dir = null; return; }
     st.dir = a.dir;
   }
@@ -476,8 +496,8 @@ class Autopilot {
   _redirectIfUseful(truck, st) {
     const from = this._logical(truck);
     if (truck.load > 0) {
-      if (this._reachStatic(from, this._crusherGoals())) {
-        this._releaseSlot(truck); st.phase = 'to_crusher'; st.dir = null; return true;
+      if (this._reachStatic(from, this._crusherGoals(), 'C')) {
+        this._releaseSlot(truck); st.phase = 'to_crusher'; st.dir = null; st.stuck = 0; return true;
       }
       return false;
     }
@@ -486,8 +506,8 @@ class Autopilot {
     const sb = this._shovelBlock(shovel);
     const block = this.hooks.getBlock(sb.bx, sb.by);
     const hasOre = block && block.explored && block.ore && block.oreRemaining > 0;
-    if (hasOre && this._reachStatic(from, this._shovelGoals(sb))) {
-      this._releaseSlot(truck); st.phase = 'to_shovel'; st.dir = null; return true;
+    if (hasOre && this._reachStatic(from, this._shovelGoals(sb), `S:${sb.bx},${sb.by}`)) {
+      this._releaseSlot(truck); st.phase = 'to_shovel'; st.dir = null; st.stuck = 0; return true;
     }
     return false;
   }
@@ -552,16 +572,107 @@ class Autopilot {
     return truck.moving ? { gx: truck.tgx, gy: truck.tgy } : { gx: truck.gx, gy: truck.gy };
   }
 
-  _advance(truck, goals, gate) {
+  // Stable priority (first-seen order). Used to decide who yields in a head-on.
+  _rankOf(truck) {
+    let r = this._rank.get(truck);
+    if (r == null) { r = this._rank.size; this._rank.set(truck, r); }
+    return r;
+  }
+
+  // Step one cell toward `goals` along the cached distance field (shortest path,
+  // re-evaluated every tick). Greedy descent: move to the free forward neighbour
+  // with the lowest remaining distance. We never step backward in normal flow,
+  // which is what eliminates the back-and-forth jitter; if the shortest step is
+  // blocked by another vehicle we wait a few ticks, then take a longer free detour
+  // when the network offers one. Genuine head-on deadlocks are broken separately
+  // by `_resolveDeadlocks`. One-way flow is enforced by `_neighbors`; `gate` may
+  // veto the final step into a goal cell. Records the intended forward cell in
+  // `st.want` (even when blocked) so the deadlock resolver can see the intent.
+  _advance(truck, goals, id, gate) {
+    const st = this.state.get(truck);
+    if (st) st.want = null;
     const lc = this._logical(truck);
-    if (goals.has(key(lc.gx, lc.gy))) return { arrived: !truck.moving, dir: null };
-    let dir = this._nextDir(lc, goals, truck);
-    if (dir && gate) {
-      const nx = lc.gx + dir[0];
-      const ny = lc.gy + dir[1];
-      if (goals.has(key(nx, ny)) && !gate(nx, ny)) dir = null;
+    const lck = key(lc.gx, lc.gy);
+    if (goals.has(lck)) { if (st) st.stuck = 0; return { arrived: !truck.moving, dir: null }; }
+
+    const field = this._distField(goals, id);
+    const dC = field.get(lck);
+    if (dC == null) { if (st) st.stuck = 0; return { arrived: false, dir: null }; } // unreachable
+
+    const gateOk = (n) => !(goals.has(key(n.gx, n.gy)) && gate && !gate(n.gx, n.gy));
+
+    let want = null, wantD = Infinity;       // closest forward neighbour (free or not)
+    let prog = null, progD = Infinity;       // free, strictly closer
+    let detour = null, detourD = Infinity;   // free, not closer, not a U-turn
+    for (const n of this._neighbors(lc)) {
+      const dn = field.get(key(n.gx, n.gy));
+      if (dn == null || !gateOk(n)) continue;
+      if (dn < dC && dn < wantD) { wantD = dn; want = n; }
+      if (this.isFree && !this.isFree(n.gx, n.gy, truck)) continue;
+      if (dn < dC) { if (dn < progD) { progD = dn; prog = n; } }
+      else if (!(n.gx === truck.fromGx && n.gy === truck.fromGy) && dn < detourD) { detourD = dn; detour = n; }
     }
-    return { arrived: false, dir };
+    if (st) st.want = want;   // where we'd go if unobstructed (for the resolver)
+
+    let pick = prog;
+    if (!pick && st && st.stuck >= STUCK_DETOUR) pick = detour;
+    if (pick) {
+      if (st) st.stuck = 0;
+      return { arrived: false, dir: [pick.gx - lc.gx, pick.gy - lc.gy] };
+    }
+    if (st && !truck.moving) st.stuck++;   // only count real waiting, not in-transit ticks
+    return { arrived: false, dir: null };
+  }
+
+  // Detect head-on deadlocks after every truck has chosen a direction this tick.
+  // A deadlock is a pair of stationary trucks that each want to move into the
+  // other's cell (a mutual swap) on a one-lane stretch. The lower-priority truck
+  // enters a committed "yield": it clears the lane (tucks into a side pocket, or
+  // retreats ahead of the oncoming truck until it finds one) and holds there until
+  // the other truck has passed, then resumes. This fires ONLY on a true mutual
+  // swap, so ordinary queues (trucks following one another) are never disturbed.
+  _resolveDeadlocks(dirOf) {
+    const at = new Map();   // logical cell key → stationary truck
+    for (const [truck] of this.state) {
+      if (truck.moving || !this.links.has(truck)) continue;
+      at.set(key(truck.gx, truck.gy), truck);
+    }
+    for (const [truck, st] of this.state) {
+      if (st.yield || dirOf.get(truck) || !st.want) continue;  // already yielding/moving/idle
+      const other = at.get(key(st.want.gx, st.want.gy));
+      if (!other) continue;                                    // blocker isn't a stopped truck
+      const ost = this.state.get(other);
+      if (!ost || !ost.want) continue;
+      const swap = ost.want.gx === truck.gx && ost.want.gy === truck.gy;
+      if (!swap || this._rankOf(truck) > this._rankOf(other)) continue; // higher rank holds
+      st.yield = { to: other, axis: [st.want.gx - truck.gx, st.want.gy - truck.gy], parked: false };
+      st.dir = this._yieldStep(truck, st);
+    }
+  }
+
+  // Drive a truck that is yielding to an oncoming truck (see `_resolveDeadlocks`).
+  // Monotonic by construction — it only moves AWAY from the goal (sideways into a
+  // pocket, else one cell back along the conflict axis) and never re-advances until
+  // the other truck has passed, so it can never produce back-and-forth jitter.
+  _yieldStep(truck, st) {
+    const y = st.yield;
+    const a = this._logical(truck);
+    const bl = this._logical(y.to);
+    const proj = (bl.gx - a.gx) * y.axis[0] + (bl.gy - a.gy) * y.axis[1];
+    const adjacent = Math.abs(bl.gx - a.gx) + Math.abs(bl.gy - a.gy) <= 1;
+    if (proj < 0 || (!adjacent && proj === 0)) { st.yield = null; st.stuck = 0; return null; } // passed → resume
+    if (truck.moving) return st.dir;          // finish the current hop
+    if (y.parked) return null;                // tucked aside → hold until it passes
+    let pocket = null, back = null;
+    for (const n of this._neighbors(a)) {
+      if (this.isFree && !this.isFree(n.gx, n.gy, truck)) continue;
+      const along = (n.gx - a.gx) * y.axis[0] + (n.gy - a.gy) * y.axis[1];
+      if (along === 0) pocket = n;            // off-axis escape
+      else if (along < 0) back = n;           // one cell back, away from the oncoming truck
+    }
+    if (pocket) { y.parked = true; return [pocket.gx - a.gx, pocket.gy - a.gy]; }
+    if (back) return [back.gx - a.gx, back.gy - a.gy];
+    return null;                              // boxed in — wait
   }
 
   _shovelGoals(sb) { return this._bayCells(sb.bx * 2, sb.by * 2, sb.bx * 2 + 1, sb.by * 2 + 1); }
@@ -580,16 +691,17 @@ class Autopilot {
 
   _crusherGoals() { return new Set(this._crusherBays().keys()); }
 
+  // Road cells orthogonally adjacent to the block rectangle [x0..x1]×[y0..y1]
+  // (the "bays" a truck can sit in to load/dump). Probes only the perimeter ring
+  // instead of scanning the whole road network.
   _bayCells(x0, y0, x1, y1) {
     const set = new Set();
-    for (const c of this.roads.cells.values()) {
-      if (c.parking) continue;
-      const inX = c.gx >= x0 && c.gx <= x1;
-      const inY = c.gy >= y0 && c.gy <= y1;
-      const adjV = inX && (c.gy === y0 - 1 || c.gy === y1 + 1);
-      const adjH = inY && (c.gx === x0 - 1 || c.gx === x1 + 1);
-      if (adjV || adjH) set.add(key(c.gx, c.gy));
-    }
+    const add = (gx, gy) => {
+      const c = this.roads.cells.get(key(gx, gy));
+      if (c && !c.parking) set.add(key(gx, gy));
+    };
+    for (let gx = x0; gx <= x1; gx++) { add(gx, y0 - 1); add(gx, y1 + 1); }
+    for (let gy = y0; gy <= y1; gy++) { add(x0 - 1, gy); add(x1 + 1, gy); }
     return set;
   }
 
@@ -615,65 +727,69 @@ class Autopilot {
 
   _releaseSlot(truck) { if (this._slotByTruck) this._slotByTruck.delete(truck); }
 
-  _nextDir(from, goals, truck) {
-    const path = this._pathToward(from, goals, truck);
-    if (path && path.length >= 2) return [path[1].gx - path[0].gx, path[1].gy - path[0].gy];
-    return null;
-  }
-
-  _pathToward(from, goals, truck) {
-    if (!this.roads.isRoad(from.gx, from.gy)) return null;
-    const startKey = key(from.gx, from.gy);
-    const queue = [{ gx: from.gx, gy: from.gy }];
-    const seen = new Set([startKey]);
-    const prev = new Map();
-    const goalPts = [...goals].map((k) => { const [x, y] = k.split(','); return { gx: +x, gy: +y }; });
-    const distToGoals = (gx, gy) => {
-      let d = Infinity;
-      for (const g of goalPts) d = Math.min(d, Math.abs(gx - g.gx) + Math.abs(gy - g.gy));
-      return d;
-    };
-    let bestCell = null; let bestDist = Infinity;
-    while (queue.length) {
-      const c = queue.shift();
-      const ck = key(c.gx, c.gy);
-      if (ck !== startKey) {
-        if (goals.has(ck)) return this._reconstruct(prev, c);
-        const d = distToGoals(c.gx, c.gy);
-        if (d < bestDist) { bestDist = d; bestCell = c; }
-      }
-      for (const n of this._neighbors(c)) {
-        const nk = key(n.gx, n.gy);
-        if (seen.has(nk)) continue;
-        if (this.isFree && !goals.has(nk) && !this.isFree(n.gx, n.gy, truck)) continue;
-        seen.add(nk); prev.set(nk, c); queue.push(n);
+  // Distance field: shortest road distance (respecting one-way flow) from every
+  // cell that can legally reach `goals`. Built by a reverse BFS from the goal
+  // cells — for each known cell B we admit a predecessor A iff A→B is a legal
+  // move (A is road, and B is not entered against its arrow). Vehicle-independent,
+  // so it depends only on the road network and the goal set: cached by `id` and
+  // invalidated wholesale when roads change. The greedy descent in `_advance`
+  // handles transient vehicle obstacles, so the field never needs rebuilding for
+  // them — this is the bulk of the CPU saving over per-truck BFS.
+  _distField(goals, id) {
+    if (id != null) { const hit = this._distCache.get(id); if (hit) return hit; }
+    const dist = new Map();
+    const queue = [];
+    for (const gk of goals) {
+      const [gx, gy] = gk.split(',');
+      dist.set(gk, 0);
+      queue.push({ gx: +gx, gy: +gy });
+    }
+    for (let head = 0; head < queue.length; head++) {
+      const b = queue[head];
+      const dB = dist.get(key(b.gx, b.gy));
+      const bCell = this.roads.cells.get(key(b.gx, b.gy));
+      const bDir = (bCell && !bCell.parking) ? bCell.dir : null;
+      for (const [dx, dy] of DIRS) {
+        const ax = b.gx - dx, ay = b.gy - dy;   // predecessor A; the move A→B is (dx,dy)
+        if (ax < 0 || ay < 0 || ax >= this.grid.zoneCols || ay >= this.grid.zoneRows) continue;
+        const ak = key(ax, ay);
+        if (dist.has(ak)) continue;
+        if (!this.roads.isRoad(ax, ay)) continue;
+        if (bDir && dx === -bDir.dx && dy === -bDir.dy) continue; // can't enter B against its flow
+        dist.set(ak, dB + 1);
+        queue.push({ gx: ax, gy: ay });
       }
     }
-    return bestCell ? this._reconstruct(prev, bestCell) : null;
+    if (id != null) {
+      if (this._distCache.size >= DIST_CACHE_MAX) this._distCache.clear();
+      this._distCache.set(id, dist);
+    }
+    return dist;
   }
 
-  _reachStatic(from, goals) {
+  _reachStatic(from, goals, id) {
     if (!goals || !goals.size) return false;
     if (!this.roads.isRoad(from.gx, from.gy)) return false;
-    if (goals.has(key(from.gx, from.gy))) return true;
-    const queue = [{ gx: from.gx, gy: from.gy }];
-    const seen = new Set([key(from.gx, from.gy)]);
-    while (queue.length) {
-      const c = queue.shift();
-      for (const n of this._neighbors(c)) {
-        const nk = key(n.gx, n.gy);
-        if (seen.has(nk)) continue;
-        if (goals.has(nk)) return true;
-        seen.add(nk); queue.push(n);
-      }
-    }
-    return false;
+    return this._distField(goals, id).get(key(from.gx, from.gy)) != null;
   }
 
-  _reconstruct(prev, cell) {
-    const path = [cell];
-    let k = key(cell.gx, cell.gy);
-    while (prev.has(k)) { const p = prev.get(k); path.unshift(p); k = key(p.gx, p.gy); }
+  // Greedy shortest-path reconstruction along the field, for debug visualisation.
+  _fieldPath(from, goals, id) {
+    const field = this._distField(goals, id);
+    let cur = { gx: from.gx, gy: from.gy };
+    if (field.get(key(cur.gx, cur.gy)) == null) return null;
+    const path = [cur];
+    const seen = new Set([key(cur.gx, cur.gy)]);
+    while (!goals.has(key(cur.gx, cur.gy))) {
+      const dC = field.get(key(cur.gx, cur.gy));
+      let next = null, nd = Infinity;
+      for (const n of this._neighbors(cur)) {
+        const d = field.get(key(n.gx, n.gy));
+        if (d != null && d < dC && d < nd && !seen.has(key(n.gx, n.gy))) { nd = d; next = n; }
+      }
+      if (!next) break;
+      seen.add(key(next.gx, next.gy)); path.push(next); cur = next;
+    }
     return path;
   }
 
@@ -710,21 +826,23 @@ class Autopilot {
     if (!st || this._manual.has(v)) return null;
 
     let goals = null;
+    let gid = null;
     if (st.phase === 'to_shovel') {
       const s = this.links.get(v);
-      if (s) goals = this._shovelGoals(this._shovelBlock(s));
+      if (s) { const sb = this._shovelBlock(s); goals = this._shovelGoals(sb); gid = `S:${sb.bx},${sb.by}`; }
     } else if (st.phase === 'to_crusher') {
-      goals = this._crusherGoals();
+      goals = this._crusherGoals(); gid = 'C';
     } else if (st.phase === 'to_parking') {
       const slot = this._parkSlot(v);
-      goals = slot ? new Set([key(slot.gx, slot.gy)]) : new Set();
+      if (slot) { goals = new Set([key(slot.gx, slot.gy)]); gid = `P:${slot.gx},${slot.gy}`; }
+      else goals = new Set();
     }
 
     // loading / dumping / parked → already at destination, no route to draw.
     if (!goals || !goals.size) return { path: [{ gx: v.gx, gy: v.gy }], goals: [] };
 
     const from = this._logical(v);
-    const path = this._pathToward(from, goals, v) || [{ gx: from.gx, gy: from.gy }];
+    const path = this._fieldPath(from, goals, gid) || [{ gx: from.gx, gy: from.gy }];
     const goalPts = [...goals].map((k) => { const [x, y] = k.split(','); return { gx: +x, gy: +y }; });
     return { path: path.map((c) => ({ gx: c.gx, gy: c.gy })), goals: goalPts };
   }
@@ -902,7 +1020,8 @@ class World {
 
   setRoads(cells) {
     this.roads.setNetwork(cells);
-    this.autopilot._bayCache = null;   // road change → recompute crusher bays
+    this.autopilot._bayCache = null;       // road change → recompute crusher bays
+    this.autopilot._distCache.clear();     // …and every cached distance field
   }
 
   control(label, { dir, release } = {}) {
