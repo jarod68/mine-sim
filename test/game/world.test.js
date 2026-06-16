@@ -21,7 +21,13 @@ function corridor({ oneway = false } = {}) {
 }
 
 function fakeTruck(gx, gy) {
-  return { gx, gy, tgx: gx, tgy: gy, fromGx: gx, fromGy: gy, moving: false, type: 'oht', load: 0 };
+  // A point-sized truck (single-cell footprint) keeps these pathfinding tests
+  // reasoning about one cell at a time; the real multi-cell footprint is covered
+  // by the Vehicle.footprintAt tests.
+  return {
+    gx, gy, tgx: gx, tgy: gy, fromGx: gx, fromGy: gy, moving: false, type: 'oht', load: 0,
+    footprintAt(fx, fy) { return [{ gx: fx, gy: fy }]; },
+  };
 }
 function registerTruck(ap, t) {
   ap.links.set(t, {});
@@ -92,6 +98,14 @@ describe('Vehicle', () => {
     v.place(g);
     v.update(0.01, [1, 0], g, () => true, () => false); // nothing is free
     expect(v.moving).toBe(false);
+  });
+
+  it('footprintAt covers exactly the cells the body spans along its heading', () => {
+    const v = new Vehicle({ type: 'oht', label: 'T', gx: 5, gy: 5, len: 20, wid: 10 });
+    // horizontal body (2 cells long, 1 wide) → 3 cells across one row
+    expect(v.footprintAt(5, 5, g, 0)).toEqual([{ gx: 4, gy: 5 }, { gx: 5, gy: 5 }, { gx: 6, gy: 5 }]);
+    // rotated 90° → 1 wide, 3 tall
+    expect(v.footprintAt(5, 5, g, Math.PI / 2)).toEqual([{ gx: 5, gy: 4 }, { gx: 5, gy: 5 }, { gx: 5, gy: 6 }]);
   });
 
   it('reports occupied cells including the target while moving', () => {
@@ -179,6 +193,23 @@ describe('Autopilot — distance field', () => {
     const bays = ap._bayCells(10, 10, 11, 11);
     expect(bays.has('10,9')).toBe(true);     // adjacent above
     expect(bays.has('12,12')).toBe(false);   // not adjacent
+  });
+});
+
+describe('Autopilot — shovel loading reach', () => {
+  it('loads from a road on the same or an adjacent block, not two blocks away', () => {
+    const g = grid();
+    const roads = new Roads(g);
+    roads.setNetwork([
+      { gx: 20, gy: 20 },   // same block (10,10)
+      { gx: 22, gy: 22 },   // diagonally adjacent block (11,11)
+      { gx: 26, gy: 20 },   // two blocks east (13,10)
+    ]);
+    const ap = new Autopilot(g, roads, {});
+    const goals = ap._shovelGoals({ bx: 10, by: 10 });
+    expect(goals.has('20,20')).toBe(true);
+    expect(goals.has('22,22')).toBe(true);
+    expect(goals.has('26,20')).toBe(false);
   });
 });
 
@@ -437,6 +468,15 @@ describe('World — collisions & live deltas', () => {
     expect(w._isFree(a.gx, a.gy, a)).toBe(true);        // a never blocks itself
   });
 
+  it('reserves the whole body footprint so trucks never overlap', () => {
+    const t = w.byLabel.get('OHT01');
+    const fp = t.footprintAt(t.gx, t.gy, w.grid);
+    expect(fp.length).toBeGreaterThan(1);               // the body spans several cells
+    const edge = fp.find((c) => c.gx !== t.gx || c.gy !== t.gy);
+    const other = w.vehicles.find((v) => v !== t);
+    expect(w._isFree(edge.gx, edge.gy, other)).toBe(false); // even a body-edge cell is reserved
+  });
+
   it('sends every vehicle on the first delta, then nothing when idle', () => {
     const first = w.liveDelta();
     expect(first.vehicles.length).toBe(w.vehicles.length);
@@ -579,6 +619,17 @@ describe('World — shovel relocation', () => {
     w.select('HEX01', false);
     w.autopilot._updateShovels();
     expect(w.autopilot._shovelMove.has(hex)).toBe(true);
+  });
+
+  it('relocates onto a sub-zone where its body clears nearby roads', () => {
+    const { w, hex, bx, by } = setupShovel();        // ore at (bx+1, by)
+    // a road just left of the target block, within the shovel body's reach
+    w.setRoads([{ gx: bx * 2 + 1, gy: by * 2 }]);
+    w.autopilot._updateShovels();
+    const mv = w.autopilot._shovelMove.get(hex);
+    expect(mv).toBeTruthy();
+    for (const c of hex.footprintAt(mv.gx, mv.gy, w.grid))
+      expect(w.roads.isRoad(c.gx, c.gy)).toBe(false); // body never straddles the road
   });
 
   it('abandons a relocation when the target block loses its ore', () => {

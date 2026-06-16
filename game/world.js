@@ -119,7 +119,7 @@ class Vehicle {
       const ny = this.gy + dy;
       const inBounds = nx >= 0 && nx < grid.zoneCols && ny >= 0 && ny < grid.zoneRows;
       const onRoad = !this.roadOnly || this.manual || (isRoad && isRoad(nx, ny));
-      const cells = this.cellsAround(nx, ny, { dx, dy }, grid);
+      const cells = this.footprintAt(nx, ny, grid);
       const free = !isFree || cells.every((c) => isFree(c.gx, c.gy, this));
       if (inBounds && onRoad && free) {
         this.fromGx = this.gx; this.fromGy = this.gy;
@@ -129,18 +129,30 @@ class Vehicle {
     }
   }
 
-  cellsAround(gx, gy, dir, grid) {
-    const zone = Math.min(grid.zoneW, grid.zoneH);
-    const lenCells = Math.max(1, Math.round(this.len / zone));
+  // Every grid cell the vehicle's graphic footprint overlaps when centred on cell
+  // (gx,gy): the axis-aligned bounds of its (len × wid) body rotated by `heading`.
+  // Collision reserves exactly these cells, so two vehicles never share one — and
+  // therefore their sprites never overlap.
+  footprintAt(gx, gy, grid, heading = this.heading) {
+    const c = Math.abs(Math.cos(heading));
+    const s = Math.abs(Math.sin(heading));
+    const hx = (c * this.len + s * this.wid) / 2;   // half-extents of the AABB (px)
+    const hy = (s * this.len + c * this.wid) / 2;
+    const cx = (gx + 0.5) * grid.zoneW;
+    const cy = (gy + 0.5) * grid.zoneH;
+    const x0 = Math.floor((cx - hx) / grid.zoneW);
+    const x1 = Math.ceil((cx + hx) / grid.zoneW) - 1;
+    const y0 = Math.floor((cy - hy) / grid.zoneH);
+    const y1 = Math.ceil((cy + hy) / grid.zoneH) - 1;
     const cells = [];
-    for (let i = 0; i < lenCells; i++) cells.push({ gx: gx - dir.dx * i, gy: gy - dir.dy * i });
+    for (let yy = y0; yy <= y1; yy++)
+      for (let xx = x0; xx <= x1; xx++) cells.push({ gx: xx, gy: yy });
     return cells;
   }
 
   occupiedCells(grid) {
-    const dir = { dx: Math.round(Math.cos(this.heading)), dy: Math.round(Math.sin(this.heading)) };
-    const cells = this.cellsAround(this.gx, this.gy, dir, grid);
-    if (this.moving) for (const c of this.cellsAround(this.tgx, this.tgy, dir, grid)) cells.push(c);
+    const cells = this.footprintAt(this.gx, this.gy, grid);
+    if (this.moving) for (const c of this.footprintAt(this.tgx, this.tgy, grid)) cells.push(c);
     return cells;
   }
 }
@@ -325,15 +337,10 @@ class Autopilot {
       const here = this.hooks.getBlock(bx, by);
       // Productive only on an explored block that still has ore → keep mining.
       if (here && here.explored && here.ore && here.oreRemaining > 0) continue;
-      // Otherwise relocate to the best EXPLORED ore block within 3 blocks.
-      // Relocation never reveals undrilled ground, and never moves onto a road.
-      const next = this._bestOreInRadius(bx, by, 3);
-      if (next) {
-        this._shovelMove.set(shovel, {
-          gx: next.bx * 2 + (shovel.gx % 2),
-          gy: next.by * 2 + (shovel.gy % 2),
-        });
-      }
+      // Otherwise relocate to the best EXPLORED ore block within 3 blocks, onto a
+      // sub-zone where the shovel's body clears every surrounding road.
+      const next = this._bestOreInRadius(shovel, bx, by, 3);
+      if (next) this._shovelMove.set(shovel, next.place);
     }
   }
 
@@ -346,11 +353,36 @@ class Autopilot {
     return false;
   }
 
-  // Best EXPLORED ore block within `R` blocks (Chebyshev) of (bx,by) to move to.
-  // Never reveals undrilled ground and never a block that lies on a road.
-  // Priority: blocks adjacent to a road (a bay, so trucks can reach) win; then
-  // the nearest; then the richest. Returns { bx, by } or null.
-  _bestOreInRadius(bx, by, R) {
+  // True when the shovel's whole graphic footprint, centred on cell (gx,gy), stays
+  // in bounds and clears every road cell — so it never parks straddling a road.
+  _footprintRoadFree(shovel, gx, gy) {
+    for (const c of shovel.footprintAt(gx, gy, this.grid)) {
+      if (c.gx < 0 || c.gy < 0 || c.gx >= this.grid.zoneCols || c.gy >= this.grid.zoneRows) return false;
+      if (this.roads.isRoad(c.gx, c.gy)) return false;
+    }
+    return true;
+  }
+
+  // A sub-zone of block (bx,by) where the shovel can sit without its body
+  // overlapping any road. Prefers the cell matching its current parity. Null if
+  // every sub-zone would straddle a road. Returns { gx, gy }.
+  _shovelPlacement(shovel, bx, by) {
+    const xs = (shovel.gx % 2) === 0 ? [0, 1] : [1, 0];
+    const ys = (shovel.gy % 2) === 0 ? [0, 1] : [1, 0];
+    for (const oy of ys)
+      for (const ox of xs) {
+        const gx = bx * 2 + ox;
+        const gy = by * 2 + oy;
+        if (this._footprintRoadFree(shovel, gx, gy)) return { gx, gy };
+      }
+    return null;
+  }
+
+  // Best EXPLORED ore block within `R` blocks (Chebyshev) of (bx,by) for `shovel`
+  // to move to. Never reveals undrilled ground, never a block on a road, and only
+  // blocks where a road-clear placement exists for this shovel's body. Priority:
+  // road access first, then nearest, then richest. Returns { bx, by, place } | null.
+  _bestOreInRadius(shovel, bx, by, R) {
     let best = null;
     for (let dy = -R; dy <= R; dy++) {
       for (let dx = -R; dx <= R; dx++) {
@@ -360,9 +392,11 @@ class Autopilot {
         const b = this.hooks.getBlock(nbx, nby);
         if (!(b && b.explored && b.ore && b.oreRemaining > 0)) continue;
         if (this._blockOnRoad(nbx, nby)) continue;       // never sit on a road
+        const place = this._shovelPlacement(shovel, nbx, nby);
+        if (!place) continue;                            // body would straddle a road
         const hasRoad = this._bayCells(nbx * 2, nby * 2, nbx * 2 + 1, nby * 2 + 1).size > 0;
         const dist = Math.max(Math.abs(dx), Math.abs(dy));
-        const cand = { bx: nbx, by: nby, ore: b.oreRemaining, hasRoad, dist };
+        const cand = { bx: nbx, by: nby, ore: b.oreRemaining, hasRoad, dist, place };
         if (!best || this._betterOreTarget(cand, best)) best = cand;
       }
     }
@@ -572,6 +606,18 @@ class Autopilot {
     return truck.moving ? { gx: truck.tgx, gy: truck.tgy } : { gx: truck.gx, gy: truck.gy };
   }
 
+  // Can `truck` sit centred on cell (gx,gy) heading (dx,dy) without its footprint
+  // overlapping another vehicle? Mirrors the check Vehicle.update does for the
+  // real move, so the autopilot doesn't keep ordering moves that get rejected.
+  _canOccupy(truck, gx, gy, dx, dy) {
+    if (!this.isFree) return true;
+    const heading = (dx || dy) ? Math.atan2(dy, dx) : truck.heading;
+    for (const c of truck.footprintAt(gx, gy, this.grid, heading)) {
+      if (!this.isFree(c.gx, c.gy, truck)) return false;
+    }
+    return true;
+  }
+
   // Stable priority (first-seen order). Used to decide who yields in a head-on.
   _rankOf(truck) {
     let r = this._rank.get(truck);
@@ -609,7 +655,7 @@ class Autopilot {
       const dn = field.get(key(n.gx, n.gy));
       if (dn == null || !gateOk(n)) continue;
       if (dn < dC && dn < wantD) { wantD = dn; want = n; }
-      if (this.isFree && !this.isFree(n.gx, n.gy, truck)) continue;
+      if (!this._canOccupy(truck, n.gx, n.gy, n.gx - lc.gx, n.gy - lc.gy)) continue;
       const back = n.gx === truck.fromGx && n.gy === truck.fromGy;
       if (dn < dC) { if (dn < progD) { progD = dn; prog = n; } }
       else if (back) continue;
@@ -682,7 +728,20 @@ class Autopilot {
     return null;                              // boxed in — wait
   }
 
-  _shovelGoals(sb) { return this._bayCells(sb.bx * 2, sb.by * 2, sb.bx * 2 + 1, sb.by * 2 + 1); }
+  // Cells from which a truck can be loaded: any road cell on the shovel's block
+  // or on a block adjacent to it (Chebyshev distance ≤ 1 block). A truck only has
+  // to reach the same or a neighbouring block — it needn't sit in a specific bay.
+  _shovelGoals(sb) {
+    const set = new Set();
+    const x0 = (sb.bx - 1) * 2, x1 = (sb.bx + 1) * 2 + 1;
+    const y0 = (sb.by - 1) * 2, y1 = (sb.by + 1) * 2 + 1;
+    for (let gy = y0; gy <= y1; gy++)
+      for (let gx = x0; gx <= x1; gx++) {
+        const c = this.roads.cells.get(key(gx, gy));
+        if (c && !c.parking) set.add(key(gx, gy));
+      }
+    return set;
+  }
 
   // Map of every crusher bay cell key → its crusher index (cached; invalidated
   // when the road network changes).
