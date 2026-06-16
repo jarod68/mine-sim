@@ -5,10 +5,20 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "docker:build": "docker buildx create --name minesim-builder --driver docker-container --bootstrap --use 2>/dev/null || true && docker buildx build --builder minesim-builder --platform linux/amd64,linux/arm64 -t jarod68/mine-sim:latest --push ."
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "prebuild": "npm run coverage",
+    "build": "docker buildx create --name minesim-builder --driver docker-container --bootstrap --use 2>/dev/null || true && docker buildx build --builder minesim-builder --platform linux/amd64,linux/arm64 -t jarod68/mine-sim:latest --push .",
+    "docker:build": "npm run build"
   },
   "dependencies": {
     "express": "^4.19.2",
     "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
+    "happy-dom": "^15.11.7",
+    "vitest": "^2.1.9"
   }
 }

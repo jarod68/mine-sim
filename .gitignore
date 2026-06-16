@@ -1,0 +1,5 @@
+# Test coverage output
+coverage/
+
+# Dependencies (recommended — see note below)
+node_modules/

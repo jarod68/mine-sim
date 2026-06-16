@@ -1224,4 +1224,7 @@ function fieldEq(a, b) {
   return false;
 }
 
-module.exports = { World, VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST };
+module.exports = {
+  World, Vehicle, Roads, Autopilot,
+  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST,
+};
