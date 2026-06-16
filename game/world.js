@@ -603,18 +603,25 @@ class Autopilot {
 
     let want = null, wantD = Infinity;       // closest forward neighbour (free or not)
     let prog = null, progD = Infinity;       // free, strictly closer
-    let detour = null, detourD = Infinity;   // free, not closer, not a U-turn
+    let lane = null;                         // free, equal-distance parallel lane (overtake)
+    let detour = null, detourD = Infinity;   // free, longer way round, not a U-turn
     for (const n of this._neighbors(lc)) {
       const dn = field.get(key(n.gx, n.gy));
       if (dn == null || !gateOk(n)) continue;
       if (dn < dC && dn < wantD) { wantD = dn; want = n; }
       if (this.isFree && !this.isFree(n.gx, n.gy, truck)) continue;
+      const back = n.gx === truck.fromGx && n.gy === truck.fromGy;
       if (dn < dC) { if (dn < progD) { progD = dn; prog = n; } }
-      else if (!(n.gx === truck.fromGx && n.gy === truck.fromGy) && dn < detourD) { detourD = dn; detour = n; }
+      else if (back) continue;
+      else if (dn === dC) { if (!lane) lane = n; }              // sideways onto an equal lane
+      else if (dn < detourD) { detourD = dn; detour = n; }       // a strictly longer reroute
     }
     if (st) st.want = want;   // where we'd go if unobstructed (for the resolver)
 
-    let pick = prog;
+    // Prefer real progress; if the lane ahead is blocked, change lane at once to
+    // overtake (an equal-distance parallel lane = the next carriageway lane), and
+    // only fall back to a longer detour after waiting a beat.
+    let pick = prog || lane;
     if (!pick && st && st.stuck >= STUCK_DETOUR) pick = detour;
     if (pick) {
       if (st) st.stuck = 0;

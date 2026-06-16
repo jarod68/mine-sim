@@ -243,6 +243,37 @@ describe('Autopilot — _advance descent', () => {
   });
 });
 
+describe('Autopilot — overtaking on a parallel lane', () => {
+  // A two-lane one-way carriageway (rows 10 & 11, both flowing east).
+  function carriageway() {
+    const g = grid();
+    const roads = new Roads(g);
+    const cells = [];
+    for (let x = 10; x <= 20; x++) { cells.push({ gx: x, gy: 10, dir: { dx: 1, dy: 0 } }); cells.push({ gx: x, gy: 11, dir: { dx: 1, dy: 0 } }); }
+    roads.setNetwork(cells);
+    const ap = new Autopilot(g, roads, {});
+    return { ap, goals: new Set(['20,10', '20,11']) };
+  }
+
+  it('changes lane immediately when the lane ahead is blocked', () => {
+    const { ap, goals } = carriageway();
+    const t = fakeTruck(15, 10);
+    registerTruck(ap, t);
+    ap.isFree = (gx, gy) => !(gx === 16 && gy === 10); // a truck blocks the cell ahead
+    const a = ap._advance(t, goals, 'g', null);
+    expect(a.dir).toEqual([0, 1]);            // pull onto the parallel lane at once
+    expect(ap.state.get(t).stuck).toBe(0);    // no waiting — overtake is immediate
+  });
+
+  it('stays in lane and drives straight when nothing blocks it', () => {
+    const { ap, goals } = carriageway();
+    const t = fakeTruck(15, 10);
+    registerTruck(ap, t);
+    ap.isFree = () => true;
+    expect(ap._advance(t, goals, 'g', null).dir).toEqual([1, 0]); // no needless weaving
+  });
+});
+
 describe('Autopilot — head-on deadlock', () => {
   function headOn(withPocket) {
     const g = grid();

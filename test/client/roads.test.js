@@ -85,4 +85,71 @@ describe('Roads editor (client)', () => {
     roads.load([{ gx: 4, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 5, gy: 5 }]);
     expect(roads._incomingDir(roads.cells.get('5,5'))).toEqual({ dx: 1, dy: 0 });
   });
+
+  it('_opposite detects exactly-reversed flow directions', () => {
+    expect(roads._opposite({ dx: 1, dy: 0 }, { dx: -1, dy: 0 })).toBe(true);
+    expect(roads._opposite({ dx: 0, dy: 1 }, { dx: 0, dy: -1 })).toBe(true);
+    expect(roads._opposite({ dx: 1, dy: 0 }, { dx: 1, dy: 0 })).toBe(false);
+    expect(roads._opposite({ dx: 1, dy: 0 }, null)).toBe(false);
+  });
+
+  it('_sameDir detects identical flow directions', () => {
+    expect(roads._sameDir({ dx: 1, dy: 0 }, { dx: 1, dy: 0 })).toBe(true);
+    expect(roads._sameDir({ dx: 1, dy: 0 }, { dx: -1, dy: 0 })).toBe(false);
+    expect(roads._sameDir({ dx: 1, dy: 0 }, null)).toBe(false);
+  });
+
+  it('draws a dashed lane line only between same-direction adjacent lanes', () => {
+    const countSegments = (r) => {
+      let n = 0;
+      r._drawLaneLines({ strokeStyle: '', lineWidth: 0, beginPath() {}, stroke() {}, setLineDash() {}, moveTo() {}, lineTo() { n++; } });
+      return n;
+    };
+    const same = makeRoads();
+    same.load([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 5, gy: 6, dir: { dx: 1, dy: 0 } }]);
+    expect(countSegments(same)).toBe(1); // single dashed line on the shared edge
+
+    const opposing = makeRoads();
+    opposing.load([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 5, gy: 6, dir: { dx: -1, dy: 0 } }]);
+    expect(countSegments(opposing)).toBe(0); // opposing lanes use the yellow line instead
+  });
+
+  it('_hasParallelLane flags both cells of a multi-lane carriageway (same way or opposing)', () => {
+    // opposing parallel lanes
+    roads.load([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 5, gy: 6, dir: { dx: -1, dy: 0 } }]);
+    expect(roads._hasParallelLane(roads.cells.get('5,5'))).toBe(true);
+    expect(roads._hasParallelLane(roads.cells.get('5,6'))).toBe(true);
+
+    // same-direction parallel lanes
+    const same = makeRoads();
+    same.load([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 5, gy: 6, dir: { dx: 1, dy: 0 } }]);
+    expect(same._hasParallelLane(same.cells.get('5,5'))).toBe(true);
+    expect(same._hasParallelLane(same.cells.get('5,6'))).toBe(true);
+
+    // a lone lane (the neighbour is in-line, not alongside) is single-lane
+    const inline = makeRoads();
+    inline.load([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 6, gy: 5, dir: { dx: 1, dy: 0 } }]);
+    expect(inline._hasParallelLane(inline.cells.get('5,5'))).toBe(false);
+  });
+
+  it('draws a double centre line only between opposing adjacent lanes', () => {
+    const countSegments = (r) => {
+      let n = 0;
+      r._drawCenterLines({ strokeStyle: '', lineWidth: 0, lineCap: '', beginPath() {}, stroke() {}, moveTo() {}, lineTo() { n++; } });
+      return n;
+    };
+    // two stacked horizontal lanes, opposite ways → one shared edge, double line
+    roads.load([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 5, gy: 6, dir: { dx: -1, dy: 0 } }]);
+    expect(countSegments(roads)).toBe(2);
+
+    // same-direction neighbours → no centre line
+    const same = makeRoads();
+    same.load([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }, { gx: 5, gy: 6, dir: { dx: 1, dy: 0 } }]);
+    expect(countSegments(same)).toBe(0);
+
+    // opposing vertical lanes side by side → double line on the vertical edge
+    const vert = makeRoads();
+    vert.load([{ gx: 5, gy: 5, dir: { dx: 0, dy: 1 } }, { gx: 6, gy: 5, dir: { dx: 0, dy: -1 } }]);
+    expect(countSegments(vert)).toBe(2);
+  });
 });

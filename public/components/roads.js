@@ -209,6 +209,96 @@ export class Roads {
     if (mode === 'draw') this._ensure(gx, gy).dir = { dx, dy }; // endpoint keeps a flow
   }
 
+  // Two flow directions are exact opposites (e.g. east vs west).
+  _opposite(a, b) { return !!(a && b && a.dx === -b.dx && a.dy === -b.dy); }
+
+  // Two flow directions are identical (two lanes of a one-way carriageway).
+  _sameDir(a, b) { return !!(a && b && a.dx === b.dx && a.dy === b.dy); }
+
+  // True when this lane runs alongside a parallel lane — another carriageway lane
+  // sharing the same axis, whether flowing the same way (multi-lane one-way) or
+  // opposite (divided two-way). Checks the neighbours perpendicular to travel
+  // (above/below for a horizontal lane, left/right for a vertical one), so BOTH
+  // cells of the pair test positive. Such lanes carry only a sparse, regularly
+  // spaced arrow — the lane markings already convey the flow.
+  _hasParallelLane(c) {
+    if (!c.dir) return false;
+    const perp = c.dir.dy === 0 ? [[0, -1], [0, 1]] : [[-1, 0], [1, 0]];
+    for (const [dx, dy] of perp) {
+      const nb = this.cells.get(this.key(c.gx + dx, c.gy + dy));
+      if (nb && !nb.parking && (this._opposite(c.dir, nb.dir) || this._sameDir(c.dir, nb.dir))) return true;
+    }
+    return false;
+  }
+
+  // Paint the double yellow centre line wherever two adjacent lanes flow in
+  // opposite directions — the US "no passing" marking on the boundary between
+  // opposing traffic. Each shared edge is drawn once: a horizontal lane only
+  // checks the cell below it, a vertical lane only the cell to its right, so the
+  // partner cell never redraws the same line.
+  _drawCenterLines(ctx) {
+    const { zoneW, zoneH } = this.grid;
+    const s = Math.min(zoneW, zoneH);
+    const gap = Math.max(0.6, s * 0.08);     // separation of the two yellow lines
+    ctx.strokeStyle = 'rgba(240, 198, 30, 0.92)';
+    ctx.lineWidth = Math.max(0.5, s * 0.035);
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    for (const c of this.cells.values()) {
+      if (c.parking || !c.dir) continue;
+      const x = c.gx * zoneW;
+      const y = c.gy * zoneH;
+      if (c.dir.dy === 0) {                   // horizontal lane → opposing lane below
+        const nb = this.cells.get(this.key(c.gx, c.gy + 1));
+        if (nb && !nb.parking && this._opposite(c.dir, nb.dir)) {
+          const ey = (c.gy + 1) * zoneH;
+          ctx.moveTo(x, ey - gap / 2); ctx.lineTo(x + zoneW, ey - gap / 2);
+          ctx.moveTo(x, ey + gap / 2); ctx.lineTo(x + zoneW, ey + gap / 2);
+        }
+      } else if (c.dir.dx === 0) {            // vertical lane → opposing lane to the right
+        const nb = this.cells.get(this.key(c.gx + 1, c.gy));
+        if (nb && !nb.parking && this._opposite(c.dir, nb.dir)) {
+          const ex = (c.gx + 1) * zoneW;
+          ctx.moveTo(ex - gap / 2, y); ctx.lineTo(ex - gap / 2, y + zoneH);
+          ctx.moveTo(ex + gap / 2, y); ctx.lineTo(ex + gap / 2, y + zoneH);
+        }
+      }
+    }
+    ctx.stroke();
+  }
+
+  // Paint a dashed white lane line wherever two adjacent lanes flow the SAME way
+  // (a multi-lane one-way carriageway) — the broken white marking of a highway
+  // that vehicles may cross to overtake. One stroke per shared edge.
+  _drawLaneLines(ctx) {
+    const { zoneW, zoneH } = this.grid;
+    const s = Math.min(zoneW, zoneH);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = Math.max(0.5, s * 0.035);
+    ctx.setLineDash([Math.max(1.5, s * 0.42), Math.max(1.5, s * 0.34)]);
+    ctx.beginPath();
+    for (const c of this.cells.values()) {
+      if (c.parking || !c.dir) continue;
+      const x = c.gx * zoneW;
+      const y = c.gy * zoneH;
+      if (c.dir.dy === 0) {                   // horizontal lane → same-way lane below
+        const nb = this.cells.get(this.key(c.gx, c.gy + 1));
+        if (nb && !nb.parking && this._sameDir(c.dir, nb.dir)) {
+          const ey = (c.gy + 1) * zoneH;
+          ctx.moveTo(x, ey); ctx.lineTo(x + zoneW, ey);
+        }
+      } else if (c.dir.dx === 0) {            // vertical lane → same-way lane to the right
+        const nb = this.cells.get(this.key(c.gx + 1, c.gy));
+        if (nb && !nb.parking && this._sameDir(c.dir, nb.dir)) {
+          const ex = (c.gx + 1) * zoneW;
+          ctx.moveTo(ex, y); ctx.lineTo(ex, y + zoneH);
+        }
+      }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   // ── rendering ──
   render() {
     const ctx = this.ctx;
@@ -242,6 +332,11 @@ export class Roads {
     }
     ctx.stroke();
     ctx.setLineDash([]);
+
+    // double yellow centre line between opposing lanes, dashed white line between
+    // same-way lanes (US-style highway markings on the shared edges).
+    this._drawCenterLines(ctx);
+    this._drawLaneLines(ctx);
 
     // parking pads
     for (const p of this.parkings) {
@@ -294,8 +389,16 @@ export class Roads {
     // ~10 sub-blocks keep one. Arrows curve through turns and intersections.
     const s = Math.min(zoneW, zoneH);
     const period = this.editing ? 4 : 10; // denser while editing, sparse after
+    const widePeriod = this.editing ? 12 : 24; // multi-lane roads: one arrow, far apart
     for (const c of this.cells.values()) {
       if (c.parking) continue;
+      // A multi-lane carriageway (a lane paired with a parallel one, same way or
+      // opposing) shows its flow via the lane markings — keep just a sparse arrow,
+      // far apart, like the periodic markings on a real highway lane.
+      if (this._hasParallelLane(c)) {
+        if (c.dir && ((c.gx + c.gy) % widePeriod) === 0) this._arrow(ctx, c, s, this.editing);
+        continue;
+      }
       if (this._isJunction(c)) {
         // intersection: one arrow per supported exit direction (flow-respecting)
         for (const e of this._exits(c)) this._arrowDir(ctx, c, s, e, this.editing);
