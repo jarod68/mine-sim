@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { camera, applyCamera, toWorld } from '../../public/components/camera.js';
+import { camera, applyCamera, toWorld, visibleRect, DPR } from '../../public/components/camera.js';
 
 describe('camera', () => {
   beforeEach(() => { camera.scale = 1; camera.ox = 0; camera.oy = 0; });
@@ -22,5 +22,23 @@ describe('camera', () => {
     const ctx = { setTransform: (...a) => { args = a; } };
     applyCamera(ctx, 2); // dpr = 2
     expect(args).toEqual([6, 0, 0, 6, 14, 18]); // [dpr*scale,0,0,dpr*scale,dpr*ox,dpr*oy]
+  });
+
+  it('visibleRect is the full viewport at the identity transform', () => {
+    const r = visibleRect(100, 80);
+    expect(Math.abs(r.x0)).toBe(0);
+    expect(Math.abs(r.y0)).toBe(0);
+    expect(r.x1).toBe(100);
+    expect(r.y1).toBe(80);
+  });
+
+  it('visibleRect inverts pan and zoom to world coordinates', () => {
+    camera.scale = 2; camera.ox = 10; camera.oy = 20;
+    expect(visibleRect(100, 80)).toEqual({ x0: -5, y0: -10, x1: 45, y1: 30 });
+  });
+
+  it('DPR is capped at 2', () => {
+    expect(DPR).toBeLessThanOrEqual(2);
+    expect(DPR).toBeGreaterThan(0);
   });
 });

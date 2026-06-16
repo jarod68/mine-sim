@@ -3,7 +3,7 @@
 // receives and forwards manual-driving commands. Positions are smoothed between
 // server updates by lerping toward the latest target.
 
-import { applyCamera } from './camera.js';
+import { applyCamera, visibleRect, DPR } from './camera.js';
 import { COLORS_SOLID } from './mine.js';
 
 const KEY_DIRS = {
@@ -142,7 +142,7 @@ export class Fleet {
     this.ctx = canvas.getContext('2d');
     this.view = view;
     this.grid = grid;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = DPR;
     this.vehicles = [];
     this.byLabel = new Map();
     this.selected = null;
@@ -272,8 +272,15 @@ export class Fleet {
 
     this._drawDebug(ctx);
 
+    // Cull vehicles outside the viewport (cheap when zoomed in). The lerp still
+    // runs for everyone so positions stay correct when they scroll back in.
+    const cssW = this.cssW ?? this.canvas.width / this.dpr;
+    const cssH = this.cssH ?? this.canvas.height / this.dpr;
+    const vr = visibleRect(cssW, cssH);
     for (const v of this.vehicles) {
       v.lerp(k);
+      const m = Math.max(v.len, v.wid);
+      if (v.x < vr.x0 - m || v.x > vr.x1 + m || v.y < vr.y0 - m || v.y > vr.y1 + m) continue;
       v.draw(ctx, v === this.selected);
     }
 

@@ -47,6 +47,28 @@ net.onVehicle = (v) => {           // a newly bought asset (no full-state reload
   if (!shopEl.hidden) renderShop();
 };
 
+// ── render scheduler ──
+// The mine and roads layers are static between edits, so they must NOT redraw on
+// every block delta (≤15 Hz) or every pan/zoom event. Instead we mark layers
+// dirty and flush at most once per animation frame. (The vehicle layer animates
+// continuously on its own rAF for smooth lerping.)
+let mineDirty = false;
+let roadsDirty = false;
+let framePending = false;
+function flushFrame() {
+  framePending = false;
+  if (mineDirty && game) { game.render(); mineDirty = false; }
+  if (roadsDirty && roads) { roads.render(); roadsDirty = false; }
+}
+function scheduleFrame() {
+  if (framePending) return;
+  framePending = true;
+  requestAnimationFrame(flushFrame);
+}
+function invalidateMine() { mineDirty = true; scheduleFrame(); }
+function invalidateRoads() { roadsDirty = true; scheduleFrame(); }
+function invalidateAll() { mineDirty = roadsDirty = true; scheduleFrame(); }
+
 // ── helpers ──
 function paintLegend() {
   for (const sw of document.querySelectorAll('.legend .sw')) {
@@ -129,6 +151,7 @@ function build(state) {
   roads.setCrushers(state.crushers);
   if (state.roads) roads.load(state.roads);
   roads.onChange = scheduleRoadsSave;
+  roads.onRender = invalidateRoads;   // coalesce edit/pan redraws into the shared frame
 
   fleet = new Fleet(document.getElementById('vehicle-layer'), { w: VIEW_W, h: VIEW_H }, grid);
   fleet.onControl = (label, cmd) => net.control(label, cmd);
@@ -174,7 +197,7 @@ function onLive(data) {
   if (data.vehicles && data.vehicles.length) fleet.applyDeltas(data.vehicles);
   if (data.blocks && data.blocks.length) {
     for (const b of data.blocks) game.mine.blocks[b.y][b.x] = b;
-    game.render();
+    invalidateMine();   // redraw at most once next frame, not synchronously per delta
   }
   if ('debug' in data) fleet.debugPaths = data.debug;
   updateAssetLive();
@@ -183,7 +206,7 @@ function onLive(data) {
 // ── Camera: scroll to zoom, right-drag to pan ──
 function setupCamera() {
   const stage = document.querySelector('main');
-  const rerender = () => { game.render(); roads.render(); };
+  const rerender = invalidateAll;   // coalesced: redraw mine + roads once next frame
   const resizeAll = () => {
     const w = stage.clientWidth;
     const h = stage.clientHeight;

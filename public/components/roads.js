@@ -4,7 +4,7 @@
 // intersections (adjacent cells merge automatically). The "invert" action flips
 // the circulation direction of the whole network.
 
-import { applyCamera, toWorld } from './camera.js';
+import { applyCamera, toWorld, DPR } from './camera.js';
 
 export class Roads {
   constructor(canvas, view, grid) {
@@ -12,7 +12,7 @@ export class Roads {
     this.ctx = canvas.getContext('2d');
     this.view = view;
     this.grid = grid;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = DPR;
     this.cells = new Map();      // "gx,gy" -> { gx, gy, dir:{dx,dy}|null, parking }
     this.parkings = [];          // { x, y, w, h } patches (rendered distinctly)
     this.crushers = [];          // [{ x, y, w, h }] sub-zone footprints (not roads)
@@ -21,6 +21,7 @@ export class Roads {
     this.drawing = false;
     this.last = null;
     this.onChange = null;        // called after edits (persist to server)
+    this.onRender = null;        // set by the host to coalesce redraws into one rAF
 
     canvas.addEventListener('pointerdown', (e) => this._down(e));
     window.addEventListener('pointermove', (e) => this._move(e));
@@ -30,6 +31,11 @@ export class Roads {
   }
 
   _changed() { if (this.onChange) this.onChange(); }
+
+  // Request a redraw. The host routes this through a shared rAF so many edits or
+  // pan/zoom events in one frame collapse into a single render(); without a host
+  // hook we fall back to drawing immediately.
+  _invalidate() { if (this.onRender) this.onRender(); else this.render(); }
 
   // Non-parking road cells, as a plain array (for server persistence).
   serialize() {
@@ -48,7 +54,7 @@ export class Roads {
       const cell = this._ensure(c.gx, c.gy);
       cell.dir = c.dir || null;
     }
-    this.render();
+    this._invalidate();
   }
 
   // Replace the whole drawn network with the server's canonical copy (keeps
@@ -65,7 +71,7 @@ export class Roads {
     this.canvas.height = Math.round(cssH * this.dpr);
     this.canvas.style.width = `${cssW}px`;
     this.canvas.style.height = `${cssH}px`;
-    this.render();
+    this._invalidate();
   }
 
   setTool(tool) {
@@ -73,20 +79,20 @@ export class Roads {
     this.editing = tool !== 'none';
     this.canvas.style.pointerEvents = tool === 'none' ? 'none' : 'auto';
     this.canvas.style.cursor = tool === 'erase' ? 'cell' : tool === 'draw' ? 'crosshair' : 'default';
-    this.render(); // toggle between editing (denser) and reduced arrows
+    this._invalidate(); // toggle between editing (denser) and reduced arrows
   }
 
   invert() {
     for (const c of this.cells.values()) {
       if (c.dir) c.dir = { dx: -c.dir.dx, dy: -c.dir.dy };
     }
-    this.render();
+    this._invalidate();
     this._changed();
   }
 
   clear() {
     this.cells.clear();
-    this.render();
+    this._invalidate();
     this._changed();
   }
 
@@ -100,14 +106,14 @@ export class Roads {
     for (let gy = y; gy < y + h; gy++) {
       for (let gx = x; gx < x + w; gx++) this._ensure(gx, gy).parking = true;
     }
-    this.render();
+    this._invalidate();
   }
 
   // Crusher buildings (sub-zone footprints). Not roads: trucks dump from an
   // adjacent road cell.
   setCrushers(list) {
     this.crushers = Array.isArray(list) ? list : [];
-    this.render();
+    this._invalidate();
   }
 
   // ── drawing ──
@@ -138,7 +144,7 @@ export class Roads {
     this.last = this._cellAt(e);
     if (this.tool === 'draw') this._ensure(this.last.gx, this.last.gy);
     else this._eraseAt(this.last.gx, this.last.gy);
-    this.render();
+    this._invalidate();
   }
 
   _move(e) {
@@ -146,7 +152,7 @@ export class Roads {
     const cur = this._cellAt(e);
     if (this.tool === 'draw') this._connectTo(cur);
     else this._eraseLine(cur);
-    this.render();
+    this._invalidate();
   }
 
   _eraseAt(gx, gy) {

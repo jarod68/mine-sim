@@ -3,7 +3,11 @@
 // richness) and is split into 4 sub-zones by dashed guides.
 
 import { COLORS } from './mine.js';
-import { applyCamera, toWorld } from './camera.js';
+import { applyCamera, toWorld, visibleRect, camera, DPR } from './camera.js';
+
+// Below this on-screen block size (CSS px) the sub-zone guides, borders and ore
+// hatching are sub-pixel noise — skip them and draw flat colour fills only.
+const DETAIL_PX = 9;
 
 // World coordinate space — must match the server (game/world.js).
 export const VIEW_W = 7942;
@@ -15,7 +19,7 @@ export class GameCanvas {
     this.ctx = canvas.getContext('2d');
     this.mine = mine;
     this.onBlockClick = onBlockClick;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = DPR;
 
     this.bw = VIEW_W / mine.cols;
     this.bh = VIEW_H / mine.rows;
@@ -63,17 +67,61 @@ export class GameCanvas {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     applyCamera(ctx, this.dpr);
 
-    for (let y = 0; y < this.mine.rows; y++) {
-      for (let x = 0; x < this.mine.cols; x++) {
-        this._drawBlock(this.mine.blocks[y][x], x * bw, y * bh);
+    // ── viewport culling: only touch the blocks actually on screen ──
+    const cssW = this.cssW ?? this.canvas.width / this.dpr;
+    const cssH = this.cssH ?? this.canvas.height / this.dpr;
+    const vr = visibleRect(cssW, cssH);
+    const x0 = Math.max(0, Math.floor(vr.x0 / bw));
+    const y0 = Math.max(0, Math.floor(vr.y0 / bh));
+    const x1 = Math.min(this.mine.cols - 1, Math.floor(vr.x1 / bw));
+    const y1 = Math.min(this.mine.rows - 1, Math.floor(vr.y1 / bh));
+    if (x1 < x0 || y1 < y0) return;
+
+    // ── base fills, batched by colour (one fill() per distinct colour) ──
+    const byColor = new Map();   // colour → Path2D
+    const oreCells = [];         // visible ore blocks needing a hatch overlay
+    for (let y = y0; y <= y1; y++) {
+      const row = this.mine.blocks[y];
+      for (let x = x0; x <= x1; x++) {
+        const b = row[x];
+        let color;
+        if (!b.explored) color = COLORS.unexplored;
+        else if (b.ore && b.oreRemaining > 0) { color = COLORS[b.ore]; oreCells.push(x, y); }
+        else color = COLORS.dirt;
+        let path = byColor.get(color);
+        if (!path) byColor.set(color, (path = new Path2D()));
+        path.rect(x * bw, y * bh, bw, bh);
       }
     }
-  }
+    for (const [color, path] of byColor) { ctx.fillStyle = color; ctx.fill(path); }
 
-  // Deterministic faint shade per cell so unexplored ground isn't flat.
-  _shade(x, y) {
-    const h = ((x * 73856093) ^ (y * 19349663)) >>> 0;
-    return ((h % 100) / 100) * 0.09;
+    // ── level of detail: skip the fine grid when blocks are tiny on screen ──
+    if (bw * camera.scale < DETAIL_PX) return;
+
+    for (let i = 0; i < oreCells.length; i += 2) this._hatch(oreCells[i] * bw, oreCells[i + 1] * bh, bw, bh);
+
+    // sub-zone guides — one dashed stroke for the whole visible grid
+    const guides = new Path2D();
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const px = x * bw, py = y * bh;
+        guides.moveTo(px + bw / 2, py); guides.lineTo(px + bw / 2, py + bh);
+        guides.moveTo(px, py + bh / 2); guides.lineTo(px + bw, py + bh / 2);
+      }
+    }
+    ctx.strokeStyle = 'rgba(92, 209, 122, 0.10)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.stroke(guides);
+    ctx.setLineDash([]);
+
+    // block borders — one solid stroke for the whole visible grid
+    const borders = new Path2D();
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++) borders.rect(x * bw + 0.5, y * bh + 0.5, bw, bh);
+    ctx.strokeStyle = 'rgba(92, 209, 122, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.stroke(borders);
   }
 
   // Diagonal hatching clipped to a block — marks a cell that still holds ore.
@@ -95,41 +143,4 @@ export class GameCanvas {
     ctx.restore();
   }
 
-  _drawBlock(block, px, py) {
-    const ctx = this.ctx;
-    const { bw, bh } = this;
-
-    // Translucent fills over the near-black canvas (glass-terminal look).
-    if (!block.explored) {
-      // undiscovered — dim phosphor void
-      ctx.fillStyle = COLORS.unexplored;
-      ctx.fillRect(px, py, bw, bh);
-    } else if (block.ore && block.oreRemaining > 0) {
-      // still holds minable ore — neon ore glow, hatched to mark the deposit
-      ctx.fillStyle = COLORS[block.ore];
-      ctx.fillRect(px, py, bw, bh);
-      this._hatch(px, py, bw, bh);
-    } else {
-      // mined out (or barren) — faint void, no hatching
-      ctx.fillStyle = COLORS.dirt;
-      ctx.fillRect(px, py, bw, bh);
-    }
-
-    // 4 sub-zones (2×2) — faint phosphor guides
-    ctx.strokeStyle = 'rgba(92, 209, 122, 0.10)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(px + bw / 2, py);
-    ctx.lineTo(px + bw / 2, py + bh);
-    ctx.moveTo(px, py + bh / 2);
-    ctx.lineTo(px + bw, py + bh / 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // block border — phosphor grid line
-    ctx.strokeStyle = 'rgba(92, 209, 122, 0.16)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px + 0.5, py + 0.5, bw, bh);
-  }
 }
