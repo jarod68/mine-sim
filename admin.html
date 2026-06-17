@@ -36,6 +36,13 @@
       padding: 3px 12px; font: inherit; font-size: 12px; cursor: pointer;
     }
     .join:hover { background: #2f74e0; }
+    .grant { display: flex; gap: 5px; }
+    .credit-btn {
+      background: #1f6b3a; color: #d6ffe4; border: 1px solid #2e8b4f; border-radius: 5px;
+      padding: 3px 9px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .credit-btn:hover { background: #2a8c4d; }
+    .credit-btn:disabled { opacity: .5; cursor: default; }
     .muted { color: #6f7682; }
     .log { max-height: 340px; overflow: auto; border: 1px solid #23262d; border-radius: 6px; }
     .log table { margin: 0; }
@@ -60,7 +67,7 @@
   <table>
     <thead><tr>
       <th>Code</th><th>Status</th><th>Players</th><th>Peak</th><th>Joins</th>
-      <th>Created</th><th>Age</th><th>Credit</th><th>Assets</th><th></th>
+      <th>Created</th><th>Age</th><th>Credit</th><th>Assets</th><th>Add credit</th><th></th>
     </tr></thead>
     <tbody id="active"></tbody>
   </table>
@@ -105,6 +112,19 @@
     function join(code) { window.open('/?room=' + encodeURIComponent(code), '_blank'); }
     window.join = join;
 
+    async function addCredit(code, amount) {
+      try {
+        const r = await fetch('/admin/api/credit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, amount }),
+        });
+        if (!r.ok) console.warn('credit grant failed', r.status);
+      } catch { /* transient */ }
+      refresh();
+    }
+    window.addCredit = addCredit;
+
     function render(d) {
       $('updated').textContent = 'updated ' + tm(d.now);
       $('s-active').textContent = d.activeCount;
@@ -119,8 +139,12 @@
           <td>${dt(s.createdAt)}</td><td>${dur(s.ageMs)}</td>
           <td class="money">${money(s.credit)}</td>
           <td class="assets">${assets(s.assets)}</td>
+          <td class="grant">
+            <button class="credit-btn" onclick="addCredit('${esc(s.code)}', 100000)">+100K</button>
+            <button class="credit-btn" onclick="addCredit('${esc(s.code)}', 500000)">+500K</button>
+          </td>
           <td><button class="join" onclick="join('${esc(s.code)}')">Join ▸</button></td>
-        </tr>`).join('') : '<tr><td colspan="10" class="empty">No live sessions.</td></tr>';
+        </tr>`).join('') : '<tr><td colspan="11" class="empty">No live sessions.</td></tr>';
 
       $('history').innerHTML = d.history.length ? d.history.map((s) => `
         <tr>

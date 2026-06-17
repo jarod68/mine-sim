@@ -1247,6 +1247,12 @@ class World {
     this.credit += Math.round(rate * t);
   }
 
+  // Admin grant: adjust the balance (never below 0). Returns the new credit.
+  addCredit(amount) {
+    this.credit = Math.max(0, this.credit + Math.round(Number(amount) || 0));
+    return this.credit;
+  }
+
   // ── commands ──
   drill(x, y) {
     if (!Number.isInteger(x) || !Number.isInteger(y) ||

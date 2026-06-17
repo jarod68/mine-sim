@@ -515,6 +515,14 @@ describe('World — collisions & live deltas', () => {
     expect(w.credit).toBe(100000);
     expect(w.vehicles.length).toBe(9);
   });
+
+  it('addCredit grants money and never goes below zero', () => {
+    w.credit = 100000;
+    expect(w.addCredit(100000)).toBe(200000);
+    expect(w.credit).toBe(200000);
+    expect(w.addCredit(-1e9)).toBe(0);     // clamped at 0
+    expect(w.addCredit('nope')).toBe(0);   // bad input is a no-op
+  });
 });
 
 // ── Full haul cycle (integration) ─────────────────────────────────────────────

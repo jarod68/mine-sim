@@ -20,6 +20,21 @@ app.get('/admin', adminGuard, (req, res) => res.sendFile(path.join(__dirname, 'a
 app.get('/admin/api/sessions', adminGuard, (req, res) =>
   res.json(buildAdminData({ rooms, sessionLog, eventLog, graceMs: ROOM_GRACE_MS })));
 
+// Grant credit to a room from the admin page (+100k / +500k buttons).
+app.post('/admin/api/credit', adminGuard, express.json(), (req, res) => {
+  const { code, amount } = req.body || {};
+  const room = typeof code === 'string' ? rooms.get(code.toUpperCase()) : null;
+  if (!room) return res.status(404).json({ error: 'room not found' });
+  const amt = Number(amount);
+  if (!Number.isFinite(amt) || amt === 0) return res.status(400).json({ error: 'bad amount' });
+  const credit = room.world.addCredit(amt);
+  // Push the new balance to connected clients without touching the road network.
+  roomBroadcast(room, { t: 'live', vehicles: [], blocks: [], credit });
+  logEvent('credit', room.code, { amount: amt, credit });
+  console.log(`[credit] room=${room.code} +${amt} -> ${credit}`);
+  res.json({ ok: true, code: room.code, credit });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const server = http.createServer(app);
