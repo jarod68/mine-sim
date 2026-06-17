@@ -27,6 +27,7 @@ function fakeTruck(gx, gy) {
   return {
     gx, gy, tgx: gx, tgy: gy, fromGx: gx, fromGy: gy, moving: false, type: 'oht', load: 0,
     footprintAt(fx, fy) { return [{ gx: fx, gy: fy }]; },
+    collisionCells(fx, fy) { return [{ gx: fx, gy: fy }]; },
   };
 }
 function registerTruck(ap, t) {
@@ -468,13 +469,21 @@ describe('World — collisions & live deltas', () => {
     expect(w._isFree(a.gx, a.gy, a)).toBe(true);        // a never blocks itself
   });
 
-  it('reserves the whole body footprint so trucks never overlap', () => {
-    const t = w.byLabel.get('OHT01');
-    const fp = t.footprintAt(t.gx, t.gy, w.grid);
-    expect(fp.length).toBeGreaterThan(1);               // the body spans several cells
-    const edge = fp.find((c) => c.gx !== t.gx || c.gy !== t.gy);
-    const other = w.vehicles.find((v) => v !== t);
-    expect(w._isFree(edge.gx, edge.gy, other)).toBe(false); // even a body-edge cell is reserved
+  it('reserves a truck centre + rear cell so followers keep a body-length gap', () => {
+    const t = w.byLabel.get('OHT01');                   // heading 0 → faces +x
+    const full = t.footprintAt(t.gx, t.gy, w.grid);     // the sprite body spans several cells
+    const collide = t.occupiedCells(w.grid);            // what collision actually reserves
+    expect(full.length).toBeGreaterThan(1);
+    expect(collide.length).toBeLessThan(full.length);   // tighter than the full body
+    const has = (gx, gy) => collide.some((c) => c.gx === gx && c.gy === gy);
+    expect(has(t.gx, t.gy)).toBe(true);                 // centre held
+    expect(has(t.gx - 1, t.gy)).toBe(true);             // rear cell held → follower gap
+    expect(has(t.gx + 1, t.gy)).toBe(false);            // cell AHEAD free → can nuzzle a shovel
+  });
+
+  it('shovels still reserve their full multi-cell body', () => {
+    const hex = w.byLabel.get('HEX01');
+    expect(hex.occupiedCells(w.grid).length).toBeGreaterThan(1);
   });
 
   it('sends every vehicle on the first delta, then nothing when idle', () => {
@@ -562,6 +571,75 @@ describe('World — haul cycle integration', () => {
     for (let i = 2; i < positions.length; i++)
       if (positions[i] === positions[i - 2] && positions[i] !== positions[i - 1]) jitter++;
     expect(jitter).toBe(0);
+  });
+
+  it('prefers loading from an adjacent road cell, staying on the network', () => {
+    // setupHaul runs the road directly above the shovel, so a road cell touches
+    // the shovel body — the truck must load there rather than going off-road.
+    const { w, oht } = setupHaul();
+    const hex = w.byLabel.get('HEX01');
+    const phases = new Set();
+    let loadedOnRoadAdjacent = false;
+    let everLeftRoad = false;
+    for (let i = 0; i < 2000; i++) {
+      w.tick(1 / 30);
+      const st = w.autopilot.state.get(oht);
+      if (st) phases.add(st.phase);
+      if (oht.offroad) everLeftRoad = true;
+      if (st && st.phase === 'loading') {
+        const occ = new Set(hex.footprintAt(hex.gx, hex.gy, w.grid).map((c) => `${c.gx},${c.gy}`));
+        const adj = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => occ.has(`${oht.gx + dx},${oht.gy + dy}`));
+        if (adj && w.roads.isRoad(oht.gx, oht.gy)) loadedOnRoadAdjacent = true;
+      }
+    }
+    expect(loadedOnRoadAdjacent).toBe(true);
+    expect(phases.has('docking')).toBe(false);   // never needed to leave the road
+    expect(everLeftRoad).toBe(false);
+    expect(phases.has('dumping')).toBe(true);
+  });
+
+  it('docks off-road into the cell touching the shovel when no road cell does', () => {
+    const w = new World();
+    const { autopilot: ap, roads, grid: g } = w;
+    const hex = w.byLabel.get('HEX01');
+    const sbx = Math.floor(hex.gx / 2), sby = Math.floor(hex.gy / 2);
+    const b = w.mine.blocks[sby][sbx];
+    b.explored = true; b.ore = 'gold'; b.orePct = 15; b.oreRemaining = 1e12; b.dirtRemaining = 0;
+
+    const cbx = sbx + 8;
+    w.crushers = [{ x: cbx * 2, y: sby * 2, w: 2, h: 2 }];
+    roads.setCrushers(w.crushers); ap._bayCache = null; ap._distCache.clear();
+
+    // Road runs TWO rows above the shovel body, so no road cell touches it
+    // (forcing an off-road dock), with a short spur down to the crusher bay.
+    const gy = sby * 2 - 2;
+    const cells = [];
+    for (let gx = 6; gx <= cbx * 2 + 1; gx++) cells.push({ gx, gy, dir: null });
+    for (let yy = 5; yy < gy; yy++) cells.push({ gx: 6, gy: yy, dir: null });
+    cells.push({ gx: cbx * 2, gy: gy + 1, dir: null });   // bay cell adjacent to the crusher
+    w.setRoads(cells);
+
+    const oht = w.byLabel.get('OHT01');
+    oht.gx = 6; oht.gy = gy; oht.tgx = 6; oht.tgy = gy; oht.fromGx = 6; oht.fromGy = gy; oht.moving = false;
+    oht.x = (6 + 0.5) * g.zoneW; oht.y = (gy + 0.5) * g.zoneH;
+    w.assign('OHT01', 'HEX01');
+
+    const phases = new Set();
+    let offRoadAdjacent = false;
+    for (let i = 0; i < 2000; i++) {
+      w.tick(1 / 30);
+      const st = ap.state.get(oht);
+      if (st) phases.add(st.phase);
+      if (st && st.phase === 'loading') {
+        const occ = new Set(hex.footprintAt(hex.gx, hex.gy, w.grid).map((c) => `${c.gx},${c.gy}`));
+        const adj = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => occ.has(`${oht.gx + dx},${oht.gy + dy}`));
+        if (adj && !w.roads.isRoad(oht.gx, oht.gy)) offRoadAdjacent = true;
+      }
+    }
+    expect(phases.has('docking')).toBe(true);
+    expect(phases.has('undocking')).toBe(true);
+    expect(offRoadAdjacent).toBe(true);
+    expect(phases.has('dumping')).toBe(true);
   });
 
   it('exposes a debug plan for a vehicle when enabled', () => {

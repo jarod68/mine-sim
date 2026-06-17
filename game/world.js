@@ -38,6 +38,14 @@ const PARK_BLOCKS = {
 
 const BASE_SPEED = 168; // px/s
 
+// Collision footprint multiplier for haul trucks. Their real body is ~1.45 cells
+// long, which under the cell-reservation rule (any cell the body's AABB clips is
+// reserved) makes a horizontal truck occupy 3 cells and forces ~3-cell following
+// gaps. Shrinking the *collision* footprint (not the sprite) to its centre cell
+// lets trucks tuck right up behind one another; the tiny sprite overlap when
+// bumper-to-bumper is the accepted trade-off for a tighter convoy.
+const TRUCK_COLLISION_SCALE = 0.66;
+
 const SPECS = {
   pickup:    { model: 'Light Utility Vehicle' },
   excavator: { model: 'Liebherr R9400', bucket: 40 },
@@ -87,6 +95,10 @@ class Vehicle {
     this.digging = false;
     this.manual = false;
     this.manualDir = null;
+    // Autopilot may steer this vehicle off the road (truck docking to a shovel).
+    this.offroad = false;
+    // Collision footprint multiplier (see TRUCK_COLLISION_SCALE). 1 = full body.
+    this.collisionScale = type === 'oht' ? TRUCK_COLLISION_SCALE : 1;
   }
 
   place(grid) {
@@ -118,8 +130,8 @@ class Vehicle {
       const nx = this.gx + dx;
       const ny = this.gy + dy;
       const inBounds = nx >= 0 && nx < grid.zoneCols && ny >= 0 && ny < grid.zoneRows;
-      const onRoad = !this.roadOnly || this.manual || (isRoad && isRoad(nx, ny));
-      const cells = this.footprintAt(nx, ny, grid);
+      const onRoad = !this.roadOnly || this.manual || this.offroad || (isRoad && isRoad(nx, ny));
+      const cells = this.collisionCells(nx, ny, grid, this.heading);
       const free = !isFree || cells.every((c) => isFree(c.gx, c.gy, this));
       if (inBounds && onRoad && free) {
         this.fromGx = this.gx; this.fromGy = this.gy;
@@ -133,11 +145,12 @@ class Vehicle {
   // (gx,gy): the axis-aligned bounds of its (len × wid) body rotated by `heading`.
   // Collision reserves exactly these cells, so two vehicles never share one — and
   // therefore their sprites never overlap.
-  footprintAt(gx, gy, grid, heading = this.heading) {
+  footprintAt(gx, gy, grid, heading = this.heading, scale = 1) {
     const c = Math.abs(Math.cos(heading));
     const s = Math.abs(Math.sin(heading));
-    const hx = (c * this.len + s * this.wid) / 2;   // half-extents of the AABB (px)
-    const hy = (s * this.len + c * this.wid) / 2;
+    const len = this.len * scale, wid = this.wid * scale;
+    const hx = (c * len + s * wid) / 2;   // half-extents of the AABB (px)
+    const hy = (s * len + c * wid) / 2;
     const cx = (gx + 0.5) * grid.zoneW;
     const cy = (gy + 0.5) * grid.zoneH;
     const x0 = Math.floor((cx - hx) / grid.zoneW);
@@ -150,9 +163,25 @@ class Vehicle {
     return cells;
   }
 
+  // Cells this vehicle's collision reserves when centred on (gx,gy) facing
+  // `heading`: its (possibly shrunk) body footprint, plus — for haul trucks — the
+  // single cell directly BEHIND it. The rear cell forces a follower to leave a
+  // body-length gap (so two truck sprites never touch) while keeping the cell
+  // AHEAD free, so a truck can still pull right up against a shovel or crusher.
+  collisionCells(gx, gy, grid, heading = this.heading) {
+    const s = this.collisionScale;
+    const cells = this.footprintAt(gx, gy, grid, heading, s);
+    if (this.type === 'oht') {
+      const bx = -Math.round(Math.cos(heading));
+      const by = -Math.round(Math.sin(heading));
+      for (const c of this.footprintAt(gx + bx, gy + by, grid, heading, s)) cells.push(c);
+    }
+    return cells;
+  }
+
   occupiedCells(grid) {
-    const cells = this.footprintAt(this.gx, this.gy, grid);
-    if (this.moving) for (const c of this.footprintAt(this.tgx, this.tgy, grid)) cells.push(c);
+    const cells = this.collisionCells(this.gx, this.gy, grid, this.heading);
+    if (this.moving) for (const c of this.collisionCells(this.tgx, this.tgy, grid, this.heading)) cells.push(c);
     return cells;
   }
 }
@@ -262,6 +291,7 @@ class Autopilot {
     this._shovelMove.delete(v);
     this._freeLocks(v);
     v.task = null;
+    v.offroad = false;
   }
 
   clearManual(v) {
@@ -275,6 +305,7 @@ class Autopilot {
 
   assign(truck, shovel) {
     this._freeLocks(truck);
+    truck.offroad = false;
     if (shovel) { this.links.set(truck, shovel); this.shovels.add(shovel); }
     else { this.links.delete(truck); this.state.delete(truck); truck.task = null; }
     this._ensure(truck);
@@ -448,14 +479,27 @@ class Autopilot {
     if (st.yield) { st.dir = this._yieldStep(truck, st); return; }
     const sb = this._shovelBlock(shovel);
 
+    // A road-travel phase assumes the truck is on the network. If it isn't (e.g.
+    // the player released it mid-dock), walk it back to the nearest road first —
+    // the road autopilot can't route from an off-road cell.
+    const roadPhase = st.phase === 'to_shovel' || st.phase === 'to_crusher' || st.phase === 'to_parking';
+    if (roadPhase && !this.roads.isRoad(truck.gx, truck.gy) && !truck.moving) {
+      truck.offroad = true;
+      const target = this._nearestRoadCell(truck);
+      st.dir = target ? this._offroadStep(truck, target) : null;
+      return;
+    }
+
     switch (st.phase) {
       case 'loading':    st.dir = null; shovel.digging = true; this._doLoad(dt, truck, shovel, sb, st); return;
+      case 'docking':    this._tickDocking(truck, shovel, sb, st); return;
+      case 'undocking':  this._tickUndocking(truck, st); return;
       case 'dumping':    st.dir = null; this._doDump(dt, truck, st); return;
-      case 'parked':     this._tickParked(dt, truck, shovel, sb, st); return;
-      case 'to_shovel':  this._tickToShovel(truck, shovel, sb, st); return;
-      case 'to_crusher': this._tickToCrusher(truck, st); return;
-      case 'to_parking': this._tickToParking(truck, st); return;
-      default:           st.phase = 'to_shovel'; st.dir = null; return;
+      case 'parked':     truck.offroad = false; this._tickParked(dt, truck, shovel, sb, st); return;
+      case 'to_shovel':  truck.offroad = false; this._tickToShovel(truck, shovel, sb, st); return;
+      case 'to_crusher': truck.offroad = false; this._tickToCrusher(truck, st); return;
+      case 'to_parking': truck.offroad = false; this._tickToParking(truck, st); return;
+      default:           truck.offroad = false; st.phase = 'to_shovel'; st.dir = null; return;
     }
   }
 
@@ -468,19 +512,147 @@ class Autopilot {
       st.phase = truck.load > 0 ? 'to_crusher' : 'to_parking';
       st.dir = null; return;
     }
-    const goals = this._shovelGoals(sb);
-    const gid = `S:${sb.bx},${sb.by}`;
     const from = this._logical(truck);
+    // Prefer loading from a road cell that already TOUCHES the shovel body (and is
+    // reachable with the road flow). Only when no such road cell exists do we aim
+    // at the looser block-level goals and finish off-road. A settled shovel only —
+    // a relocating one has a transient body position.
+    let goals, gid;
+    const settled = !this._shovelMove.has(shovel) && !shovel.moving;
+    const roadBays = settled ? this._shovelRoadBays(shovel) : new Set();
+    if (roadBays.size && this._reachStatic(from, roadBays, `SR:${shovel.gx},${shovel.gy}`)) {
+      goals = roadBays; gid = `SR:${shovel.gx},${shovel.gy}`;
+    } else {
+      goals = this._shovelGoals(sb); gid = `S:${sb.bx},${sb.by}`;
+    }
     if (!goals.size || !this._reachStatic(from, goals, gid)) {
       st.phase = truck.load > 0 ? 'to_crusher' : 'to_parking';
       st.dir = null; return;
     }
     const a = this._advance(truck, goals, gid, () => this._canTakeShovel(shovel, truck));
     if (a.arrived) {
-      if (this._tryLockShovel(shovel, truck)) { st.phase = 'loading'; st.timer = 0; st.bucket = 0; truck.load = 0; }
+      // Claim the shovel. If we already sit in a cell touching it (an adjacent
+      // road cell), load right here. Otherwise leave the road and nuzzle into the
+      // sub-cell next to the shovel; the arrival cell is where we rejoin the road.
+      if (this._tryLockShovel(shovel, truck)) {
+        const lc = this._logical(truck);
+        st.road = { gx: lc.gx, gy: lc.gy }; st.timer = 0; st.bucket = 0; truck.load = 0;
+        st.phase = this._adjacentToShovel(truck, shovel) ? 'loading' : 'docking';
+      }
       st.dir = null; return;
     }
     st.dir = a.dir;
+  }
+
+  // Road cells orthogonally touching the shovel's body — the preferred (on-road)
+  // loading positions, so a truck need not leave the network when one is reachable.
+  _shovelRoadBays(shovel) {
+    const occ = new Set(shovel.footprintAt(shovel.gx, shovel.gy, this.grid).map((c) => key(c.gx, c.gy)));
+    const set = new Set();
+    for (const cstr of occ) {
+      const [gx, gy] = cstr.split(',').map(Number);
+      for (const [dx, dy] of DIRS) {
+        const nx = gx + dx, ny = gy + dy;
+        if (occ.has(key(nx, ny))) continue;
+        const c = this.roads.cells.get(key(nx, ny));
+        if (c && !c.parking) set.add(key(nx, ny));
+      }
+    }
+    return set;
+  }
+
+  // Off-road approach: drive the truck from the road cell it arrived on into a
+  // free sub-cell orthogonally touching the shovel's body, then start loading.
+  // Aborts back to the road if the block runs out of ore before we get there.
+  _tickDocking(truck, shovel, sb, st) {
+    truck.task = null;
+    truck.offroad = true;
+    const block = this.hooks.getBlock(sb.bx, sb.by);
+    if (!block || !block.explored || !block.ore || block.oreRemaining <= 0) {
+      this._unlockShovel(shovel, truck);
+      st.phase = 'undocking'; st.undockThen = truck.load > 0 ? 'to_crusher' : 'to_parking'; st.dir = null; return;
+    }
+    if (!truck.moving && this._adjacentToShovel(truck, shovel)) {
+      st.phase = 'loading'; st.timer = 0; st.bucket = 0; truck.load = 0; st.dir = null; return;
+    }
+    const bay = this._shovelDockBay(truck, shovel);
+    st.dir = bay ? this._offroadStep(truck, bay) : null;
+  }
+
+  // Off-road return: drive the truck back to the road cell it docked from (or any
+  // road cell), then hand control back to the normal road autopilot.
+  _tickUndocking(truck, st) {
+    truck.task = null;
+    truck.offroad = true;
+    const lc = this._logical(truck);
+    if (!truck.moving && this.roads.isRoad(lc.gx, lc.gy)) {
+      truck.offroad = false;
+      st.phase = st.undockThen || 'to_crusher'; st.dir = null; st.stuck = 0;
+      return;
+    }
+    const target = st.road || this._nearestRoadCell(truck) || lc;
+    st.dir = this._offroadStep(truck, target);
+  }
+
+  // True when any cell of the shovel's body is orthogonally adjacent to the
+  // truck's current cell — i.e. the truck is parked right against the shovel.
+  _adjacentToShovel(truck, shovel) {
+    const a = this._logical(truck);
+    const occ = new Set(shovel.footprintAt(shovel.gx, shovel.gy, this.grid).map((c) => key(c.gx, c.gy)));
+    for (const [dx, dy] of DIRS) if (occ.has(key(a.gx + dx, a.gy + dy))) return true;
+    return false;
+  }
+
+  // Nearest free sub-cell orthogonally touching the shovel's body that the truck
+  // can occupy — the docking target. Null if the shovel is fully boxed in.
+  _shovelDockBay(truck, shovel) {
+    const occ = new Set(shovel.footprintAt(shovel.gx, shovel.gy, this.grid).map((c) => key(c.gx, c.gy)));
+    const a = this._logical(truck);
+    let best = null, bestD = Infinity;
+    for (const cstr of occ) {
+      const [gx, gy] = cstr.split(',').map(Number);
+      for (const [dx, dy] of DIRS) {
+        const nx = gx + dx, ny = gy + dy;
+        if (nx < 0 || ny < 0 || nx >= this.grid.zoneCols || ny >= this.grid.zoneRows) continue;
+        if (occ.has(key(nx, ny))) continue;
+        if (!this._canOccupy(truck, nx, ny, -dx, -dy)) continue;   // free, facing the shovel
+        const d = Math.abs(a.gx - nx) + Math.abs(a.gy - ny);
+        if (d < bestD) { bestD = d; best = { gx: nx, gy: ny }; }
+      }
+    }
+    return best;
+  }
+
+  // One orthogonal off-road step that strictly reduces Manhattan distance to
+  // `target`. Monotonic by construction, so it always terminates and can never
+  // oscillate. Null when already there or every reducing step is blocked (wait).
+  _offroadStep(truck, target) {
+    const a = this._logical(truck);
+    let best = null, bestD = Math.abs(target.gx - a.gx) + Math.abs(target.gy - a.gy);
+    if (bestD === 0) return null;
+    for (const [dx, dy] of DIRS) {
+      const nx = a.gx + dx, ny = a.gy + dy;
+      if (nx < 0 || ny < 0 || nx >= this.grid.zoneCols || ny >= this.grid.zoneRows) continue;
+      const d = Math.abs(target.gx - nx) + Math.abs(target.gy - ny);
+      if (d < bestD && this._canOccupy(truck, nx, ny, dx, dy)) { bestD = d; best = [dx, dy]; }
+    }
+    return best;
+  }
+
+  // Closest free road cell to the truck (expanding ring), used as a fallback
+  // undock target if the docking road cell was lost.
+  _nearestRoadCell(truck) {
+    const a = this._logical(truck);
+    for (let r = 1; r <= 6; r++) {
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const gx = a.gx + dx, gy = a.gy + dy;
+          if (!this.roads.isRoad(gx, gy)) continue;
+          if (this._canOccupy(truck, gx, gy, 0, 0)) return { gx, gy };
+        }
+    }
+    return null;
   }
 
   _tickToCrusher(truck, st) {
@@ -562,7 +734,7 @@ class Autopilot {
       st.timer += dt;
       if (st.timer >= 0.4) {
         this._unlockShovel(shovel, truck);
-        st.phase = truck.load > 0 ? 'to_crusher' : 'to_parking';
+        st.phase = 'undocking'; st.undockThen = truck.load > 0 ? 'to_crusher' : 'to_parking';
         st.timer = 0;
       }
       return;
@@ -583,7 +755,7 @@ class Autopilot {
       truck.load = this.hooks.mineBlock(sb.bx, sb.by, truck.load);
       this._unlockShovel(shovel, truck);
       truck.task = null;
-      st.phase = 'to_crusher'; st.timer = 0; st.bucket = 0;
+      st.phase = 'undocking'; st.undockThen = 'to_crusher'; st.timer = 0; st.bucket = 0;
     }
   }
 
@@ -612,7 +784,7 @@ class Autopilot {
   _canOccupy(truck, gx, gy, dx, dy) {
     if (!this.isFree) return true;
     const heading = (dx || dy) ? Math.atan2(dy, dx) : truck.heading;
-    for (const c of truck.footprintAt(gx, gy, this.grid, heading)) {
+    for (const c of truck.collisionCells(gx, gy, this.grid, heading)) {
       if (!this.isFree(c.gx, c.gy, truck)) return false;
     }
     return true;

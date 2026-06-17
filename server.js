@@ -17,7 +17,7 @@ const wss = new WebSocketServer({ server });
 // (create one or enter a code); ticks and broadcasts are per-room.
 const rooms = new Map();          // code → { code, world, clients:Set<ws>, emptySince, lastDebugStr }
 const MAX_ROOMS = 500;
-const ROOM_GRACE_MS = 5 * 60 * 1000;  // keep an empty room this long (reconnects)
+const ROOM_GRACE_MS = 2 * 60 * 60 * 1000;  // keep an empty room this long (reconnects)
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
 
 function genCode() {
