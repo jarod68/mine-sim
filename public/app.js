@@ -26,6 +26,8 @@ let built = false;
 let creditValue = 0;
 let catalog = [];
 let maxAssets = 25;
+let grid = null;             // sub-zone grid metrics (set in build)
+let parkRect = null;         // current parking pad rect (sub-zones)
 const debugOn = new Set();   // asset labels with debug-path view enabled
 let selectedShovelLabel = null;
 
@@ -59,6 +61,7 @@ function flushFrame() {
   framePending = false;
   if (mineDirty && game) { game.render(); mineDirty = false; }
   if (roadsDirty && roads) { roads.render(); roadsDirty = false; }
+  updateParkOverlay();   // keep the resize handles pinned to the pad as the view moves
 }
 function scheduleFrame() {
   if (framePending) return;
@@ -96,6 +99,7 @@ function setupModes() {
   const tool = { mouse: 'none', road: 'draw', erase: 'erase' };
   const setMode = (mode) => {
     roads.setTool(tool[mode]);
+    if (mode !== 'mouse') closeParkResize();   // resize handles only live in Mouse mode
     for (const [m, btn] of Object.entries(btns)) btn.classList.toggle('active', m === mode);
   };
   for (const [mode, btn] of Object.entries(btns)) btn.addEventListener('click', () => setMode(mode));
@@ -143,15 +147,16 @@ function build(state) {
 
   const zoneCols = state.cols * 2;
   const zoneRows = state.rows * 2;
-  const grid = { zoneCols, zoneRows, zoneW: VIEW_W / zoneCols, zoneH: VIEW_H / zoneRows };
+  grid = { zoneCols, zoneRows, zoneW: VIEW_W / zoneCols, zoneH: VIEW_H / zoneRows };
 
   roads = new Roads(document.getElementById('roads-layer'), { w: VIEW_W, h: VIEW_H }, grid);
-  const PARK = state.parking;
-  roads.addParking(PARK.x, PARK.y, PARK.w, PARK.h);
+  parkRect = { ...state.parking };
+  roads.addParking(parkRect.x, parkRect.y, parkRect.w, parkRect.h);
   roads.setCrushers(state.crushers);
   if (state.roads) roads.load(state.roads);
   roads.onChange = scheduleRoadsSave;
   roads.onRender = invalidateRoads;   // coalesce edit/pan redraws into the shared frame
+  roads.onPan = () => { invalidateAll(); updateParkOverlay(); };   // edge auto-pan → redraw all
 
   fleet = new Fleet(document.getElementById('vehicle-layer'), { w: VIEW_W, h: VIEW_H }, grid);
   fleet.onControl = (label, cmd) => net.control(label, cmd);
@@ -166,10 +171,19 @@ function build(state) {
     const rect = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX, e.clientY, rect);
     const v = fleet.selectAt(w.x, w.y);
-    if (v) e.stopPropagation();
-    else fleet.setSelected(null);
+    if (v) { e.stopPropagation(); popup.hide(); closeParkResize(); return; }   // selecting an asset closes the drill popup
+    fleet.setSelected(null);
+    // In Mouse mode, clicking the parking pad opens its resize handles instead of
+    // drilling the block underneath.
+    if (roads.tool === 'none' && roads.pointInParking(w.x, w.y)) {
+      e.stopPropagation();
+      openParkResize();
+      return;
+    }
+    closeParkResize();
   }, true);
 
+  setupParkOverlay();
   setupCamera();
 }
 
@@ -185,9 +199,101 @@ function refresh(state) {
   // server state must never clobber an in-progress drawing.
   if (roadsSaveTimer) flushRoadsSave();
   else roads.setNetwork(state.roads || []);
+  if (state.parking) { parkRect = { ...state.parking }; roads.setParking(parkRect); updateParkOverlay(); }
   fleet.sync(state.vehicles);
   setCredit(state.credit);   // last → refreshes the open shop with the new count
   fleet.snapToTargets();
+}
+
+// ── Parking resize overlay (drag handles on the pad's four sides) ──
+let parkOverlay = null;
+const parkHandles = {};      // side → handle element
+let parkLabel = null;
+let parkDrag = null;         // { side } while a handle is being dragged
+let parkOpen = false;
+
+function setupParkOverlay() {
+  const stage = document.querySelector('main');
+  parkOverlay = document.createElement('div');
+  parkOverlay.className = 'park-overlay';
+  parkOverlay.hidden = true;
+  for (const side of ['left', 'right', 'top', 'bottom']) {
+    const h = document.createElement('div');
+    h.className = `park-handle park-${side}`;
+    h.addEventListener('pointerdown', (e) => startParkDrag(e, side));
+    parkOverlay.appendChild(h);
+    parkHandles[side] = h;
+  }
+  parkLabel = document.createElement('div');
+  parkLabel.className = 'park-label';
+  parkOverlay.appendChild(parkLabel);
+  stage.appendChild(parkOverlay);
+  window.addEventListener('pointermove', onParkDrag);
+  window.addEventListener('pointerup', endParkDrag);
+}
+
+function openParkResize() {
+  if (!parkOverlay || !parkRect) return;
+  parkOpen = true;
+  parkOverlay.hidden = false;
+  updateParkOverlay();
+}
+function closeParkResize() {
+  if (!parkOpen) return;
+  parkOpen = false;
+  parkDrag = null;
+  if (parkOverlay) parkOverlay.hidden = true;
+}
+
+// World (logical) point → stage (CSS px) using the live camera transform.
+function worldToStage(wx, wy) {
+  return { x: wx * camera.scale + camera.ox, y: wy * camera.scale + camera.oy };
+}
+
+function updateParkOverlay() {
+  if (!parkOpen || !parkRect || !grid) return;
+  const zw = grid.zoneW, zh = grid.zoneH;
+  const x0 = parkRect.x * zw, y0 = parkRect.y * zh;
+  const x1 = (parkRect.x + parkRect.w) * zw, y1 = (parkRect.y + parkRect.h) * zh;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const place = (el, wx, wy) => { const p = worldToStage(wx, wy); el.style.left = `${p.x}px`; el.style.top = `${p.y}px`; };
+  place(parkHandles.left, x0, cy);
+  place(parkHandles.right, x1, cy);
+  place(parkHandles.top, cx, y0);
+  place(parkHandles.bottom, cx, y1);
+  place(parkLabel, x0, y0);
+  parkLabel.textContent = `Parking ${parkRect.w}×${parkRect.h}`;
+}
+
+function startParkDrag(e, side) {
+  e.preventDefault();
+  e.stopPropagation();
+  parkDrag = { side };
+  e.target.setPointerCapture?.(e.pointerId);
+}
+
+function onParkDrag(e) {
+  if (!parkDrag || !parkRect || !grid) return;
+  const rect = canvas.getBoundingClientRect();
+  const w = toWorld(e.clientX, e.clientY, rect);
+  const gx = Math.round(w.x / grid.zoneW);
+  const gy = Math.round(w.y / grid.zoneH);
+  const r = { ...parkRect };
+  const MIN = 2;
+  if (parkDrag.side === 'right') r.w = Math.max(MIN, Math.min(grid.zoneCols - r.x, gx - r.x));
+  else if (parkDrag.side === 'bottom') r.h = Math.max(MIN, Math.min(grid.zoneRows - r.y, gy - r.y));
+  else if (parkDrag.side === 'left') { const right = r.x + r.w; const nx = Math.max(0, Math.min(right - MIN, gx)); r.x = nx; r.w = right - nx; }
+  else if (parkDrag.side === 'top') { const bottom = r.y + r.h; const ny = Math.max(0, Math.min(bottom - MIN, gy)); r.y = ny; r.h = bottom - ny; }
+  parkRect = r;
+  roads.setParking(parkRect);   // live preview (re-renders the roads layer)
+  invalidateRoads();
+  updateParkOverlay();
+}
+
+function endParkDrag() {
+  if (!parkDrag) return;
+  parkDrag = null;
+  net.resizeParking(parkRect);   // commit → server trims roads and broadcasts the authoritative pad
 }
 
 // ── live delta updates (≤ 15 Hz, only what changed) ──

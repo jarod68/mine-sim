@@ -27,6 +27,8 @@ const ORE_VALUE = {
 };
 
 const PARKING = { x: 3, y: 2, w: 6, h: 3 };
+// Parked trucks all face up (nose toward -y), lined up "en bataille".
+const PARK_HEADING = -Math.PI / 2;
 const PARK_BLOCKS = {
   bx0: Math.floor(PARKING.x / 2),
   by0: Math.floor(PARKING.y / 2),
@@ -692,7 +694,7 @@ class Autopilot {
     if (!slot) { st.dir = null; return; }
     const goals = new Set([key(slot.gx, slot.gy)]);
     const a = this._advance(truck, goals, `P:${slot.gx},${slot.gy}`, null);
-    if (a.arrived) { st.phase = 'parked'; st.timer = 0; st.dir = null; return; }
+    if (a.arrived) { st.phase = 'parked'; st.timer = 0; st.dir = null; truck.heading = PARK_HEADING; return; }
     st.dir = a.dir;
   }
 
@@ -946,9 +948,12 @@ class Autopilot {
   _buildSlots() {
     this._slots = [];
     this._slotByTruck = new Map();
+    // "En bataille" grid: nose-up trucks one column apart (their narrow side) and
+    // two rows apart (so a truck's body + rear cell clears the row in front),
+    // filling the pad in tidy aligned ranks.
     for (const p of this.roads.parkings || [])
-      for (let gy = p.y; gy < p.y + p.h; gy++)
-        for (let gx = p.x; gx < p.x + p.w; gx += 2)
+      for (let gy = p.y; gy <= p.y + p.h - 1; gy += 2)
+        for (let gx = p.x; gx < p.x + p.w; gx++)
           this._slots.push({ gx, gy });
   }
 
@@ -1176,6 +1181,7 @@ class World {
     const oht2 = mk({ type: 'oht', label: 'OHT02', gx: P.x + 3, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
     const oht3 = mk({ type: 'oht', label: 'OHT03', gx: P.x + 5, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
     const oht4 = mk({ type: 'oht', label: 'OHT04', gx: P.x + 1, gy: P.y + 1, len: zone * 1.445, wid: zone * 0.7 });
+    for (const o of [oht1, oht2, oht3, oht4]) o.heading = PARK_HEADING;  // start aligned in the pad
     this.vehicles = [lv, hex1, hex2, hex3, hex4, oht1, oht2, oht3, oht4];
     this.byLabel = new Map(this.vehicles.map((v) => [v.label, v]));
 
@@ -1260,6 +1266,32 @@ class World {
     this.roads.setNetwork(cells);
     this.autopilot._bayCache = null;       // road change → recompute crusher bays
     this.autopilot._distCache.clear();     // …and every cached distance field
+  }
+
+  // Resize the (single) parking pad to a new sub-zone rectangle. Drawn road cells
+  // now covered by the pad are dropped (superfluous road on the parking); roads
+  // outside it stay, so entry/exit lanes remain connected. Returns the sanitized
+  // rect. Slot layout and path caches are rebuilt.
+  resizeParking(rect) {
+    const { zoneCols, zoneRows } = this.grid;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)));
+    const x = clamp(rect.x, 0, zoneCols - 2);
+    const y = clamp(rect.y, 0, zoneRows - 2);
+    const w = clamp(rect.w, 2, zoneCols - x);
+    const h = clamp(rect.h, 2, zoneRows - y);
+
+    // Drop the old pad cells, then any drawn road now inside the new footprint.
+    for (const [k, c] of [...this.roads.cells]) if (c.parking) this.roads.cells.delete(k);
+    for (let gy = y; gy < y + h; gy++)
+      for (let gx = x; gx < x + w; gx++) this.roads.cells.delete(key(gx, gy));
+
+    this.roads.parkings = [];
+    this.roads.addParking(x, y, w, h);
+
+    this.autopilot._slots = null;          // rebuild the parking slot grid lazily
+    this.autopilot._bayCache = null;
+    this.autopilot._distCache.clear();
+    return { x, y, w, h };
   }
 
   control(label, { dir, release } = {}) {
@@ -1378,7 +1410,7 @@ class World {
       blockTonnage: BLOCK_TONNAGE,
       credit: this.credit,
       drillCost: DRILL_COST,
-      parking: PARKING,
+      parking: this.roads.parkings[0] || PARKING,
       crushers: this.crushers,
       catalog: CATALOG,
       maxAssets: MAX_ASSETS,

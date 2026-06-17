@@ -45,6 +45,21 @@ describe('Roads editor (client)', () => {
     expect(roads.serialize()).toEqual([]);
   });
 
+  it('pointInParking hits inside the pad and misses outside', () => {
+    roads.addParking(4, 4, 3, 2);                  // sub-zones x4..6, y4..5
+    expect(roads.pointInParking(5 * 10 + 1, 4 * 10 + 1)).toBe(true);   // inside cell (5,4)
+    expect(roads.pointInParking(7 * 10 + 1, 4 * 10 + 1)).toBe(false);  // just right of the pad
+    expect(roads.pointInParking(0, 0)).toBe(false);
+  });
+
+  it('setParking replaces the pad and drops the old pad cells', () => {
+    roads.addParking(2, 2, 2, 2);
+    roads.setParking({ x: 8, y: 8, w: 3, h: 3 });
+    expect(roads.isRoad(2, 2)).toBe(false);        // old pad gone
+    expect(roads.isRoad(8, 8)).toBe(true);         // new pad present
+    expect(roads.parkings).toEqual([{ x: 8, y: 8, w: 3, h: 3 }]);
+  });
+
   it('_stroke lays a continuous run carrying the stroke direction', () => {
     roads.last = { gx: 5, gy: 5 };
     roads._stroke(5, 5, { gx: 8, gy: 5 }, 'draw');

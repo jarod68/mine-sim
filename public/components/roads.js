@@ -4,7 +4,7 @@
 // intersections (adjacent cells merge automatically). The "invert" action flips
 // the circulation direction of the whole network.
 
-import { applyCamera, toWorld, DPR } from './camera.js';
+import { applyCamera, toWorld, camera, DPR } from './camera.js';
 
 export class Roads {
   constructor(canvas, view, grid) {
@@ -22,12 +22,35 @@ export class Roads {
     this.last = null;
     this.onChange = null;        // called after edits (persist to server)
     this.onRender = null;        // set by the host to coalesce redraws into one rAF
+    this.onPan = null;           // set by the host to redraw all layers when we auto-pan
+
+    // Edge auto-pan: while drawing toward a screen edge, scroll the view that way.
+    this._panVX = 0; this._panVY = 0;
+    this._panRAF = null;
+    this._lastPointer = null;
 
     canvas.addEventListener('pointerdown', (e) => this._down(e));
     window.addEventListener('pointermove', (e) => this._move(e));
     window.addEventListener('pointerup', () => {
-      if (this.drawing) { this.drawing = false; this._changed(); }
+      if (this.drawing) { this.drawing = false; this._stopEdgePan(); this._changed(); }
     });
+  }
+
+  // A world point inside the (first) parking pad — used to open the resize UI.
+  pointInParking(wx, wy) {
+    const p = this.parkings[0];
+    if (!p) return false;
+    const x = p.x * this.grid.zoneW, y = p.y * this.grid.zoneH;
+    return wx >= x && wx < x + p.w * this.grid.zoneW && wy >= y && wy < y + p.h * this.grid.zoneH;
+  }
+
+  // Replace the (single) parking pad locally with a new sub-zone rect — used for
+  // live resize preview before the server confirms. Clears the old pad cells.
+  setParking(rect) {
+    if (!rect) return;
+    for (const [k, c] of [...this.cells]) if (c.parking) this.cells.delete(k);
+    this.parkings = [];
+    this.addParking(rect.x, rect.y, rect.w, rect.h);
   }
 
   _changed() { if (this.onChange) this.onChange(); }
@@ -125,15 +148,55 @@ export class Roads {
     return this.cells.get(k);
   }
 
-  _cellAt(e) {
+  _cellAt(e) { return this._cellAtClient(e.clientX, e.clientY); }
+
+  _cellAtClient(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
-    const w = toWorld(e.clientX, e.clientY, rect);
+    const w = toWorld(clientX, clientY, rect);
     const gx = Math.floor(w.x / this.grid.zoneW);
     const gy = Math.floor(w.y / this.grid.zoneH);
     return {
       gx: Math.max(0, Math.min(this.grid.zoneCols - 1, gx)),
       gy: Math.max(0, Math.min(this.grid.zoneRows - 1, gy)),
     };
+  }
+
+  // ── edge auto-pan while drawing ──
+  // When the pointer nears a screen edge mid-stroke, scroll the view that way and
+  // keep extending the stroke into the newly revealed area — so a road can be
+  // drawn far past the current viewport without releasing the pointer.
+  static EDGE_MARGIN = 56;   // px from the edge where panning kicks in
+  static EDGE_MAX = 14;      // max pan speed (px/frame) at the very edge
+
+  _updateEdgePan(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const m = Roads.EDGE_MARGIN;
+    const ramp = (d) => (Math.max(0, m - d) / m) * Roads.EDGE_MAX;
+    const x = clientX - rect.left, y = clientY - rect.top;
+    let vx = 0, vy = 0;
+    if (x < m) vx = -ramp(x); else if (x > rect.width - m) vx = ramp(rect.width - x);
+    if (y < m) vy = -ramp(y); else if (y > rect.height - m) vy = ramp(rect.height - y);
+    this._panVX = vx; this._panVY = vy;
+    if ((vx || vy) && !this._panRAF) this._panRAF = requestAnimationFrame(() => this._edgeTick());
+  }
+
+  _stopEdgePan() {
+    this._panVX = this._panVY = 0;
+    if (this._panRAF) { cancelAnimationFrame(this._panRAF); this._panRAF = null; }
+  }
+
+  _edgeTick() {
+    this._panRAF = null;
+    if (!this.drawing || (!this._panVX && !this._panVY) || !this._lastPointer) return;
+    // Scroll the world under the (possibly stationary) pointer, then continue the
+    // stroke to whatever cell now sits beneath it.
+    camera.ox -= this._panVX;
+    camera.oy -= this._panVY;
+    const cur = this._cellAtClient(this._lastPointer.clientX, this._lastPointer.clientY);
+    if (this.tool === 'draw') this._connectTo(cur); else this._eraseLine(cur);
+    this._invalidate();
+    if (this.onPan) this.onPan();             // redraw the other layers too
+    this._panRAF = requestAnimationFrame(() => this._edgeTick());
   }
 
   _down(e) {
@@ -149,10 +212,12 @@ export class Roads {
 
   _move(e) {
     if (this.tool === 'none' || !this.drawing) return;
+    this._lastPointer = { clientX: e.clientX, clientY: e.clientY };
     const cur = this._cellAt(e);
     if (this.tool === 'draw') this._connectTo(cur);
     else this._eraseLine(cur);
     this._invalidate();
+    this._updateEdgePan(e.clientX, e.clientY);   // auto-scroll if we're near an edge
   }
 
   _eraseAt(gx, gy) {

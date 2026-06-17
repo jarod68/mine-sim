@@ -123,6 +123,14 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'reset': world.reset(); roomBroadcast(room, { t: 'state', state: world.fullState() }); console.log(`[reset] room=${room.code}`); break;
+      case 'resizeParking': {
+        if (m.rect && typeof m.rect === 'object') {
+          const r = world.resizeParking(m.rect);
+          roomBroadcast(room, { t: 'state', state: world.fullState() });
+          console.log(`[parking] room=${room.code} -> ${JSON.stringify(r)}`);
+        }
+        break;
+      }
     }
   });
 

@@ -193,6 +193,40 @@ main {
   pointer-events: none; /* let clicks reach the mine canvas */
 }
 
+/* ── Parking resize overlay ── */
+.park-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;   /* only the handles catch the pointer */
+}
+.park-overlay[hidden] { display: none; }
+.park-handle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;  /* centre on the (left,top) anchor point */
+  background: #f2b81c;
+  border: 2px solid #14161a;
+  border-radius: 3px;
+  box-shadow: 0 0 6px rgba(242, 184, 28, 0.8);
+  pointer-events: auto;
+  touch-action: none;
+}
+.park-left, .park-right { cursor: ew-resize; }
+.park-top, .park-bottom { cursor: ns-resize; }
+.park-label {
+  position: absolute;
+  margin: -22px 0 0 -8px;
+  padding: 1px 6px;
+  background: rgba(20, 22, 26, 0.9);
+  color: #f2b81c;
+  font: 600 11px system-ui;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .hint {
   font-size: 12px;
   color: #8b919c;

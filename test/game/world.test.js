@@ -470,7 +470,8 @@ describe('World — collisions & live deltas', () => {
   });
 
   it('reserves a truck centre + rear cell so followers keep a body-length gap', () => {
-    const t = w.byLabel.get('OHT01');                   // heading 0 → faces +x
+    const t = w.byLabel.get('OHT01');
+    t.heading = 0;                                       // face +x for a deterministic check
     const full = t.footprintAt(t.gx, t.gy, w.grid);     // the sprite body spans several cells
     const collide = t.occupiedCells(w.grid);            // what collision actually reserves
     expect(full.length).toBeGreaterThan(1);
@@ -717,5 +718,60 @@ describe('World — shovel relocation', () => {
     w.mine.blocks[by][bx + 1].oreRemaining = 0; // someone else mined it out
     w.autopilot._updateShovels();
     expect(w.autopilot._shovelMove.has(hex)).toBe(false);
+  });
+});
+
+// ── Parking: alignment & resize ───────────────────────────────────────────────
+
+describe('World — parking alignment & resize', () => {
+  it('starts haul trucks aligned nose-up in the pad', () => {
+    const w = new World();
+    expect(w.byLabel.get('OHT01').heading).toBeCloseTo(-Math.PI / 2);
+  });
+
+  it('parks a truck nose-up on arrival', () => {
+    const w = new World();
+    const oht = w.byLabel.get('OHT01');
+    const st = { phase: 'to_parking', dir: null, timer: 0, stuck: 0, want: null, yield: null };
+    w.autopilot.state.set(oht, st);
+    w.autopilot.links.set(oht, w.byLabel.get('HEX01'));
+    // place it right on its slot so _advance reports arrival immediately
+    const slot = w.autopilot._parkSlot(oht);
+    oht.gx = slot.gx; oht.gy = slot.gy; oht.tgx = slot.gx; oht.tgy = slot.gy; oht.moving = false;
+    oht.heading = 0;
+    w.autopilot._tickToParking(oht, st);
+    expect(st.phase).toBe('parked');
+    expect(oht.heading).toBeCloseTo(-Math.PI / 2);
+  });
+
+  it('lays nose-up slots one column apart and two rows apart', () => {
+    const w = new World();
+    w.resizeParking({ x: 4, y: 4, w: 4, h: 4 });
+    w.autopilot._buildSlots();
+    const slots = w.autopilot._slots.map((s) => `${s.gx},${s.gy}`);
+    expect(w.autopilot._slots.length).toBe(8);     // 4 cols × 2 rows
+    expect(slots).toContain('4,4');
+    expect(slots).toContain('7,4');
+    expect(slots).toContain('4,6');
+    expect(slots).not.toContain('4,5');            // rows are two apart
+  });
+
+  it('resizes the pad, drops road inside it, keeps road outside', () => {
+    const w = new World();
+    w.setRoads([{ gx: 20, gy: 20, dir: null }, { gx: 2, gy: 2, dir: null }]);
+    const r = w.resizeParking({ x: 18, y: 18, w: 6, h: 4 });
+    expect(r).toEqual({ x: 18, y: 18, w: 6, h: 4 });
+    expect(w.roads.cells.get('20,20').parking).toBe(true);                 // now a pad cell
+    expect(w.roads.serialize().some((c) => c.gx === 20 && c.gy === 20)).toBe(false); // not drawn road
+    expect(w.roads.isRoad(2, 2)).toBe(true);                              // outside road stays
+    expect(w.fullState().parking).toEqual({ x: 18, y: 18, w: 6, h: 4 });
+  });
+
+  it('clamps the resize to a minimum 2×2 within bounds', () => {
+    const w = new World();
+    const r = w.resizeParking({ x: -5, y: -5, w: 1, h: 1 });
+    expect(r.x).toBe(0); expect(r.y).toBe(0);
+    expect(r.w).toBeGreaterThanOrEqual(2);
+    expect(r.h).toBeGreaterThanOrEqual(2);
   });
 });

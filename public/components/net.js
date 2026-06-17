@@ -88,5 +88,6 @@ export class Net {
   assign(truck, shovel)   { this._send({ t: 'assign', truck, shovel }); }
   debug(label, on)        { this._send({ t: 'debug', label, on }); }
   select(label, on)       { this._send({ t: 'select', label, on }); }
+  resizeParking(rect)     { this._send({ t: 'resizeParking', rect }); }
   reset()                 { this._send({ t: 'reset' }); }
 }
