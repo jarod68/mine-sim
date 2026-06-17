@@ -3,7 +3,7 @@
 // relocation, loading/unloading, payouts. The client only renders snapshots and
 // sends commands (drill, edit roads, drive manually, assign, reset).
 
-const { generateMine, BLOCK_TONNAGE } = require('./mine');
+const { generateMine, setOre, BLOCK_TONNAGE } = require('./mine');
 
 // View space shared with the client renderer (so x/y come ready to draw).
 // Map area ×15 of the original (×5 of the previous), view scaled to keep the
@@ -1156,12 +1156,20 @@ class World {
   reset() {
     this.mine = generateMine(COLS, ROWS);
     this.credit = STARTING_CREDIT;
-    this.crushers = placeCrushers(Math.ceil((COLS * ROWS) / BLOCKS_PER_CRUSHER));
     this.dirty = new Map();
 
     this.roads = new Roads(this.grid);
-    this.roads.addParking(PARKING.x, PARKING.y, PARKING.w, PARKING.h);
+    // Parking sized to hold the default haul-truck fleet with ≥50% free margin.
+    const park = this._sizedParkingRect(4);
+    this.roads.addParking(park.x, park.y, park.w, park.h);
+
+    this.crushers = placeCrushers(Math.ceil((COLS * ROWS) / BLOCKS_PER_CRUSHER));
+    // A random demo circuit: a one-way loop out of the parking, past a crusher,
+    // with unrevealed ore seeded alongside it — different every game.
+    const circuit = this._buildExampleCircuit(park);
+    if (circuit) this.crushers[0] = circuit.crusher;     // put a crusher on the loop
     this.roads.setCrushers(this.crushers);
+    if (circuit) this.roads.setNetwork(circuit.cells);   // pre-draw the example road
 
     const zone = Math.min(this.grid.zoneW, this.grid.zoneH);
     const mk = (o) => { const v = new Vehicle(o); v.place(this.grid); return v; };
@@ -1176,14 +1184,13 @@ class World {
     const hex2 = exca('HEX02', 20, 16, EXCAVATORS.R9600);  // bigger reference model
     const hex3 = exca('HEX03', 28, 12, EXCAVATORS.R9400);
     const hex4 = exca('HEX04', 36, 16, EXCAVATORS.R9800);  // largest reference model
-    const P = PARKING;
-    const oht1 = mk({ type: 'oht', label: 'OHT01', gx: P.x + 1, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
-    const oht2 = mk({ type: 'oht', label: 'OHT02', gx: P.x + 3, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
-    const oht3 = mk({ type: 'oht', label: 'OHT03', gx: P.x + 5, gy: P.y, len: zone * 1.445, wid: zone * 0.7 });
-    const oht4 = mk({ type: 'oht', label: 'OHT04', gx: P.x + 1, gy: P.y + 1, len: zone * 1.445, wid: zone * 0.7 });
-    for (const o of [oht1, oht2, oht3, oht4]) o.heading = PARK_HEADING;  // start aligned in the pad
+    const oht1 = mk({ type: 'oht', label: 'OHT01', gx: park.x, gy: park.y, len: zone * 1.445, wid: zone * 0.7 });
+    const oht2 = mk({ type: 'oht', label: 'OHT02', gx: park.x, gy: park.y, len: zone * 1.445, wid: zone * 0.7 });
+    const oht3 = mk({ type: 'oht', label: 'OHT03', gx: park.x, gy: park.y, len: zone * 1.445, wid: zone * 0.7 });
+    const oht4 = mk({ type: 'oht', label: 'OHT04', gx: park.x, gy: park.y, len: zone * 1.445, wid: zone * 0.7 });
     this.vehicles = [lv, hex1, hex2, hex3, hex4, oht1, oht2, oht3, oht4];
     this.byLabel = new Map(this.vehicles.map((v) => [v.label, v]));
+    this._placeTrucksInParking([oht1, oht2, oht3, oht4]);   // line them up "en bataille"
 
     this.autopilot = new Autopilot(this.grid, this.roads, {
       getBlock: (bx, by) => this.mine.blocks[by]?.[bx],
@@ -1204,6 +1211,86 @@ class World {
     this._lastVeh = new Map();
     this._lastCredit = null;
     this._debug = new Set();   // labels with debug-path visualisation enabled
+  }
+
+  // Smallest parking rectangle (anchored at PARKING) whose "en bataille" slot
+  // grid holds `n` trucks plus ≥50% spare capacity. Grows columns first, then
+  // rows, never below the default pad. `_buildSlots` lays slots at every column
+  // and every other row, so capacity = w · ceil(h/2).
+  _sizedParkingRect(n) {
+    const needed = Math.ceil(n * 1.5);
+    let { x, y, w, h } = PARKING;
+    const capacity = () => w * Math.ceil(h / 2);
+    let guard = 0;
+    while (capacity() < needed && guard++ < 200) {
+      if (w < 10 && w + x < this.grid.zoneCols - 1) w += 1;
+      else if (h + y < this.grid.zoneRows - 1) h += 2;
+      else break;
+    }
+    return { x, y, w, h };
+  }
+
+  // Line the trucks up nose-up on the parking's slot grid, left-to-right / top-to-
+  // bottom — so the default fleet starts neatly "en bataille".
+  _placeTrucksInParking(trucks) {
+    const slots = [];
+    for (const p of this.roads.parkings)
+      for (let gy = p.y; gy <= p.y + p.h - 1; gy += 2)
+        for (let gx = p.x; gx < p.x + p.w; gx++) slots.push({ gx, gy });
+    trucks.forEach((t, i) => {
+      const s = slots[Math.min(i, slots.length - 1)] || { gx: PARKING.x, gy: PARKING.y };
+      t.gx = s.gx; t.gy = s.gy; t.tgx = s.gx; t.tgy = s.gy; t.fromGx = s.gx; t.fromGy = s.gy;
+      t.moving = false; t.heading = PARK_HEADING; t.place(this.grid);
+    });
+  }
+
+  // A random demonstration circuit: a one-way rectangular loop hanging off the
+  // bottom of the parking (so trucks can enter and leave it), with a crusher on
+  // its lower edge and a little unrevealed ore seeded just inside, near the
+  // crusher. Returns { cells, crusher } or null if the map is too small.
+  _buildExampleCircuit(park) {
+    const { zoneCols, zoneRows } = this.grid;
+    const ri = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+
+    const left = park.x;
+    const top = park.y + park.h;                 // first row just below the parking
+    const maxW = zoneCols - left - 3;
+    const maxH = zoneRows - top - 4;
+    if (maxW < 10 || maxH < 10) return null;
+    const w = Math.min(maxW, ri(Math.max(park.w + 2, 14), 26));
+    const h = Math.min(maxH, ri(10, 20));
+    const right = left + w;
+    const bottom = top + h;
+
+    // Clockwise perimeter; each cell's flow points to the next cell (a closed
+    // one-way loop). The whole top edge sits against the parking, so trucks drop
+    // onto and return from the loop freely.
+    const path = [];
+    for (let gx = left; gx < right; gx++) path.push([gx, top]);
+    for (let gy = top; gy < bottom; gy++) path.push([right, gy]);
+    for (let gx = right; gx > left; gx--) path.push([gx, bottom]);
+    for (let gy = bottom; gy > top; gy--) path.push([left, gy]);
+    const cells = path.map(([gx, gy], i) => {
+      const [nx, ny] = path[(i + 1) % path.length];
+      return { gx, gy, dir: { dx: Math.sign(nx - gx), dy: Math.sign(ny - gy) } };
+    });
+
+    // A crusher just below the bottom edge — its top cells become dump bays.
+    const cgx = ri(left + 1, right - 2);
+    const crusher = { x: cgx, y: bottom + 1, w: 2, h: 2 };
+
+    // Seed unrevealed ore in the blocks just inside the bottom edge near the
+    // crusher, so a freshly-drilled block can actually feed the example haul.
+    const ores = ['iron', 'copper', 'gold', 'carbon'];
+    for (let gx = cgx - 2; gx <= cgx + 3; gx += 2) {
+      const bx = Math.floor(gx / 2), by = Math.floor((bottom - 1) / 2);
+      const b = this.mine.blocks[by]?.[bx];
+      if (!b) continue;
+      setOre(b, ores[ri(0, ores.length - 1)], ri(10, 20));
+      b.explored = false;
+    }
+
+    return { cells, crusher };
   }
 
   // ── simulation tick ──

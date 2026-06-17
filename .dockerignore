@@ -5,3 +5,5 @@ npm-debug.log
 Dockerfile
 .dockerignore
 *.md
+.env
+coverage

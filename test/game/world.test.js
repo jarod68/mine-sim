@@ -372,7 +372,34 @@ describe('World — setup & snapshots', () => {
     expect(state.vehicles.length).toBe(9); // 1 LV + 4 shovels + 4 trucks
     expect(state.vehicles.filter((v) => v.type === 'oht').length).toBe(4);
     expect(state.crushers.length).toBeGreaterThan(0);
-    expect(state.roads).toEqual([]); // only parking exists, which is excluded
+    expect(state.roads.length).toBeGreaterThan(0); // a demo circuit is pre-drawn
+  });
+
+  it('starts every truck nose-up on a distinct parking slot', () => {
+    const ohts = w.vehicles.filter((v) => v.type === 'oht');
+    const slots = new Set(ohts.map((t) => `${t.gx},${t.gy}`));
+    expect(slots.size).toBe(ohts.length);                       // no two share a slot
+    for (const t of ohts) expect(t.heading).toBeCloseTo(-Math.PI / 2);
+  });
+
+  it('pre-draws a demo loop with a crusher reachable from the parking', () => {
+    const ap = w.autopilot;
+    ap.isFree = () => true;
+    const p = w.roads.parkings[0];
+    const bays = ap._crusherGoals();
+    expect(bays.size).toBeGreaterThan(0);
+    expect(ap._reachStatic({ gx: p.x, gy: p.y }, bays, 'C')).toBe(true);
+  });
+
+  it('seeds unrevealed ore in blocks adjacent to the demo road', () => {
+    let adjacent = 0;
+    for (const c of w.roads.serialize()) {
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const b = w.mine.blocks[Math.floor((c.gy + dy) / 2)]?.[Math.floor((c.gx + dx) / 2)];
+        if (b && b.ore && !b.explored) adjacent++;
+      }
+    }
+    expect(adjacent).toBeGreaterThan(0);
   });
 
   it('hides unexplored block composition in snapshots', () => {
@@ -750,6 +777,14 @@ describe('World — parking alignment & resize', () => {
     w.autopilot._tickToParking(oht, st);
     expect(st.phase).toBe('parked');
     expect(oht.heading).toBeCloseTo(-Math.PI / 2);
+  });
+
+  it('sizes the pad for the fleet with ≥50% spare, growing when needed', () => {
+    const w = new World();
+    const small = w._sizedParkingRect(4);           // default fleet fits the base pad
+    expect(small.w * Math.ceil(small.h / 2)).toBeGreaterThanOrEqual(6);
+    const big = w._sizedParkingRect(40);            // needs 60 slots → must grow
+    expect(big.w * Math.ceil(big.h / 2)).toBeGreaterThanOrEqual(60);
   });
 
   it('lays nose-up slots one column apart and two rows apart', () => {

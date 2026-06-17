@@ -113,6 +113,7 @@ function generateMine(cols, rows) {
 
 module.exports = {
   generateMine,
+  setOre,
   BLOCK_TONNAGE,
   ORE_TYPES,
   ORE_LABELS,

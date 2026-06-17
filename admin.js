@@ -3,11 +3,43 @@
 // functions (no server state) so they can be unit-tested in isolation.
 
 const crypto = require('crypto');
+const fs = require('fs');
 
 // A short, URL-safe random password (auto-generated once per server start unless
 // ADMIN_PASS is provided via the environment).
 function genPassword() {
   return crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars
+}
+
+// Resolve the admin password, persisting it so it survives container redeploys:
+//   1. an explicit ADMIN_PASS env var always wins;
+//   2. otherwise read ADMIN_PASS from the .env file at `envPath`;
+//   3. otherwise generate one and append it to that file (created if missing).
+// Put `envPath` on a mounted volume (e.g. DATA_DIR) for the value to persist.
+function loadOrCreateAdminPass(envPath) {
+  if (process.env.ADMIN_PASS) return { pass: process.env.ADMIN_PASS, source: 'env' };
+
+  const fromFile = readEnvVar(envPath, 'ADMIN_PASS');
+  if (fromFile) return { pass: fromFile, source: 'file' };
+
+  const pass = genPassword();
+  try {
+    let existing = '';
+    try { existing = fs.readFileSync(envPath, 'utf8'); } catch { /* no file yet */ }
+    const sep = existing && !existing.endsWith('\n') ? '\n' : '';
+    fs.writeFileSync(envPath, `${existing}${sep}ADMIN_PASS=${pass}\n`, { mode: 0o600 });
+    return { pass, source: 'generated' };
+  } catch (e) {
+    return { pass, source: 'ephemeral', error: e.message };  // couldn't persist
+  }
+}
+
+// Read a single KEY=value from a .env-style file. Returns null if absent.
+function readEnvVar(envPath, key) {
+  let txt;
+  try { txt = fs.readFileSync(envPath, 'utf8'); } catch { return null; }
+  const m = txt.match(new RegExp(`^${key}=(.*)$`, 'm'));
+  return m && m[1].trim() ? m[1].trim() : null;
 }
 
 // Constant-time string compare (false on any length mismatch).
@@ -74,4 +106,4 @@ function buildAdminData({ rooms, sessionLog = [], eventLog = [], graceMs = 0, no
   };
 }
 
-module.exports = { genPassword, safeEqual, checkAuth, sessionSummary, buildAdminData };
+module.exports = { genPassword, loadOrCreateAdminPass, readEnvVar, safeEqual, checkAuth, sessionSummary, buildAdminData };

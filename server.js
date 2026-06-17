@@ -3,14 +3,17 @@ const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { World } = require('./game/world');
-const { genPassword, checkAuth, sessionSummary, buildAdminData } = require('./admin');
+const { loadOrCreateAdminPass, checkAuth, sessionSummary, buildAdminData } = require('./admin');
 
 const app = express();
 const PORT = process.env.PORT || 3200;
 
-// ── Admin auth (username "admin", auto-generated password) ────────────────────
+// ── Admin auth (username "admin", password persisted in a .env on first init) ──
+// The .env lives under DATA_DIR (point it at a mounted volume so the password
+// survives container redeploys); an explicit ADMIN_PASS env var overrides it.
 const ADMIN_USER = 'admin';
-const ADMIN_PASS = process.env.ADMIN_PASS || genPassword();   // stable if set via env
+const ENV_FILE = process.env.ADMIN_ENV_FILE || path.join(process.env.DATA_DIR || __dirname, '.env');
+const { pass: ADMIN_PASS, source: ADMIN_PASS_SOURCE } = loadOrCreateAdminPass(ENV_FILE);
 function adminGuard(req, res, next) {
   if (checkAuth(req.headers.authorization, ADMIN_USER, ADMIN_PASS)) return next();
   res.set('WWW-Authenticate', 'Basic realm="mine-sim admin", charset="UTF-8"');
@@ -247,5 +250,5 @@ process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e)
 
 server.listen(PORT, () => {
   console.log(`mine-sim running on http://localhost:${PORT}`);
-  console.log(`[admin] http://localhost:${PORT}/admin  user=${ADMIN_USER}  pass=${ADMIN_PASS}`);
+  console.log(`[admin] http://localhost:${PORT}/admin  user=${ADMIN_USER}  pass=${ADMIN_PASS}  (${ADMIN_PASS_SOURCE}: ${ENV_FILE})`);
 });

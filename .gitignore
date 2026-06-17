@@ -3,3 +3,6 @@ coverage/
 
 # Dependencies (recommended — see note below)
 node_modules/
+
+# Runtime-generated admin password (persisted on the server's volume)
+.env
