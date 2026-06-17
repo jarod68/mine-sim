@@ -28,6 +28,8 @@ let catalog = [];
 let maxAssets = 25;
 let grid = null;             // sub-zone grid metrics (set in build)
 let parkRect = null;         // current parking pad rect (sub-zones)
+let selectedBlock = null;    // last clicked block (target of the "X" drill shortcut)
+let selectedBlockPos = null;
 const debugOn = new Set();   // asset labels with debug-path view enabled
 let selectedShovelLabel = null;
 
@@ -117,8 +119,22 @@ async function drill(block) {
 
 const onBlockClick = (block, pos) => {
   fleet.selectionRect = { x: block.x * blockW, y: block.y * blockH, w: blockW, h: blockH };
+  selectedBlock = block;
+  selectedBlockPos = pos;
   popup.show(block, pos, { onDrill: drill, drillCost });
 };
+
+// "X" drills the currently selected (highlighted) block, same as the popup button.
+async function drillSelectedBlock() {
+  const b = selectedBlock;
+  if (!b || b.explored) return;
+  const wasOpen = popup.el.style.display === 'block';
+  const revealed = await drill(b);
+  if (revealed) {
+    selectedBlock = revealed;
+    if (wasOpen && selectedBlockPos) popup.show(revealed, selectedBlockPos, { onDrill: drill, drillCost });
+  }
+}
 
 let roadsSaveTimer = null;
 function scheduleRoadsSave() {
@@ -171,17 +187,26 @@ function build(state) {
     const rect = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX, e.clientY, rect);
     const v = fleet.selectAt(w.x, w.y);
-    if (v) { e.stopPropagation(); popup.hide(); closeParkResize(); return; }   // selecting an asset closes the drill popup
+    if (v) { e.stopPropagation(); popup.hide(); closeParkResize(); selectedBlock = null; return; }   // selecting an asset closes the drill popup
     fleet.setSelected(null);
     // In Mouse mode, clicking the parking pad opens its resize handles instead of
     // drilling the block underneath.
     if (roads.tool === 'none' && roads.pointInParking(w.x, w.y)) {
       e.stopPropagation();
+      selectedBlock = null;
       openParkResize();
       return;
     }
     closeParkResize();
   }, true);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'x' && e.key !== 'X') return;
+    if (e.repeat) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+    drillSelectedBlock();
+  });
 
   setupParkOverlay();
   setupCamera();
