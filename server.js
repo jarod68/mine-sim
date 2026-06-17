@@ -3,9 +3,22 @@ const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { World } = require('./game/world');
+const { genPassword, checkAuth, sessionSummary, buildAdminData } = require('./admin');
 
 const app = express();
 const PORT = process.env.PORT || 3200;
+
+// ── Admin auth (username "admin", auto-generated password) ────────────────────
+const ADMIN_USER = 'admin';
+const ADMIN_PASS = process.env.ADMIN_PASS || genPassword();   // stable if set via env
+function adminGuard(req, res, next) {
+  if (checkAuth(req.headers.authorization, ADMIN_USER, ADMIN_PASS)) return next();
+  res.set('WWW-Authenticate', 'Basic realm="mine-sim admin", charset="UTF-8"');
+  res.status(401).send('Authentication required');
+}
+app.get('/admin', adminGuard, (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+app.get('/admin/api/sessions', adminGuard, (req, res) =>
+  res.json(buildAdminData({ rooms, sessionLog, eventLog, graceMs: ROOM_GRACE_MS })));
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -15,10 +28,19 @@ const wss = new WebSocketServer({ server });
 // ── Rooms (Option B: dedicated instanced games) ───────────────────────────────
 // Each room is an isolated World with a shareable code. A client joins a room
 // (create one or enter a code); ticks and broadcasts are per-room.
-const rooms = new Map();          // code → { code, world, clients:Set<ws>, emptySince, lastDebugStr }
+const rooms = new Map();          // code → { code, world, clients:Set<ws>, emptySince, lastDebugStr, createdAt, peakClients, totalJoins }
 const MAX_ROOMS = 500;
 const ROOM_GRACE_MS = 2 * 60 * 60 * 1000;  // keep an empty room this long (reconnects)
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
+
+// Admin bookkeeping: ended sessions and a recent activity log (both in-memory,
+// reset on restart). Bounded so a long-lived server doesn't grow unbounded.
+const sessionLog = [];            // ended-session summaries
+const eventLog = [];              // { at, type, code, ... } activity entries
+function logEvent(type, code, extra = {}) {
+  eventLog.push({ at: Date.now(), type, code, ...extra });
+  if (eventLog.length > 500) eventLog.shift();
+}
 
 function genCode() {
   let c;
@@ -30,8 +52,14 @@ function genCode() {
 }
 
 function createRoom() {
-  const room = { code: genCode(), world: new World(), clients: new Set(), emptySince: null, lastDebugStr: null };
+  const now = Date.now();
+  const room = {
+    code: genCode(), world: new World(), clients: new Set(),
+    emptySince: now, lastDebugStr: null,
+    createdAt: now, peakClients: 0, totalJoins: 0,
+  };
   rooms.set(room.code, room);
+  logEvent('create', room.code);
   return room;
 }
 
@@ -48,6 +76,9 @@ function joinRoom(ws, room) {
   ws.room = room;
   room.clients.add(ws);
   room.emptySince = null;
+  room.totalJoins = (room.totalJoins || 0) + 1;
+  room.peakClients = Math.max(room.peakClients || 0, room.clients.size);
+  logEvent('join', room.code, { players: room.clients.size });
   send(ws, { t: 'joined', room: room.code });
   send(ws, { t: 'state', state: room.world.fullState() });
   console.log(`[join] room=${room.code} clients=${room.clients.size} roads=${room.world.roads.serialize().length}`);
@@ -59,6 +90,7 @@ function leaveRoom(ws) {
   room.clients.delete(ws);
   ws.room = null;
   if (room.clients.size === 0) room.emptySince = Date.now();
+  logEvent('leave', room.code, { players: room.clients.size });
   console.log(`[leave] room=${room.code} clients=${room.clients.size}`);
 }
 
@@ -122,7 +154,7 @@ wss.on('connection', (ws) => {
         console.log(`[buy] room=${room.code} id=${m.id} ok=${!!r.ok}`);
         break;
       }
-      case 'reset': world.reset(); roomBroadcast(room, { t: 'state', state: world.fullState() }); console.log(`[reset] room=${room.code}`); break;
+      case 'reset': world.reset(); roomBroadcast(room, { t: 'state', state: world.fullState() }); logEvent('reset', room.code); console.log(`[reset] room=${room.code}`); break;
       case 'resizeParking': {
         if (m.rect && typeof m.rect === 'object') {
           const r = world.resizeParking(m.rect);
@@ -185,7 +217,10 @@ setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
     if (room.clients.size === 0 && room.emptySince && now - room.emptySince > ROOM_GRACE_MS) {
+      sessionLog.push({ ...sessionSummary(room, now), status: 'ended', endedAt: now });
+      if (sessionLog.length > 300) sessionLog.shift();
       rooms.delete(code);
+      logEvent('reap', code);
       console.log(`[reap] room=${code} (empty > grace)`);
     }
   }
@@ -197,4 +232,5 @@ process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e)
 
 server.listen(PORT, () => {
   console.log(`mine-sim running on http://localhost:${PORT}`);
+  console.log(`[admin] http://localhost:${PORT}/admin  user=${ADMIN_USER}  pass=${ADMIN_PASS}`);
 });

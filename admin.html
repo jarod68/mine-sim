@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mine Sim — Admin</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 18px 22px;
+      background: #0e0f12; color: #d7dbe2;
+      font: 14px/1.45 system-ui, sans-serif;
+    }
+    h1 { font-size: 19px; margin: 0 0 2px; color: #f2b81c; }
+    h2 { font-size: 14px; margin: 24px 0 8px; color: #9fb0c6; text-transform: uppercase; letter-spacing: .06em; }
+    .sub { color: #8b919c; font-size: 12px; margin: 0 0 14px; }
+    .bar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+    .stat { background: #16181d; border: 1px solid #2a2e36; border-radius: 6px; padding: 6px 12px; }
+    .stat b { color: #5cd17a; font-size: 18px; font-variant-numeric: tabular-nums; }
+    .stat span { color: #8b919c; font-size: 11px; display: block; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+    th, td { text-align: left; padding: 6px 9px; border-bottom: 1px solid #23262d; white-space: nowrap; }
+    th { color: #8b919c; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    td { font-variant-numeric: tabular-nums; }
+    tbody tr:hover { background: #15171c; }
+    .code { font-weight: 700; color: #f2b81c; letter-spacing: .08em; }
+    .pill { padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .pill.active { background: rgba(92,209,122,.16); color: #5cd17a; }
+    .pill.idle   { background: rgba(242,184,28,.16); color: #f2b81c; }
+    .pill.ended  { background: rgba(139,145,156,.16); color: #aab; }
+    .money { color: #5cd17a; }
+    .assets { color: #c7ccd4; font-size: 12px; }
+    .join {
+      background: #2563c9; color: #fff; border: none; border-radius: 5px;
+      padding: 3px 12px; font: inherit; font-size: 12px; cursor: pointer;
+    }
+    .join:hover { background: #2f74e0; }
+    .muted { color: #6f7682; }
+    .log { max-height: 340px; overflow: auto; border: 1px solid #23262d; border-radius: 6px; }
+    .log table { margin: 0; }
+    .ev { font-weight: 600; }
+    .ev.create { color: #5cd17a; } .ev.join { color: #6cb6ff; } .ev.leave { color: #f2b81c; }
+    .ev.reset { color: #e08adf; } .ev.reap { color: #ff7a7a; }
+    .empty { color: #6f7682; padding: 10px 9px; }
+    footer { margin-top: 22px; color: #5b616b; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>⛏ Mine Sim — Admin</h1>
+  <p class="sub">Live sessions, history and activity log. Auto-refreshing every 3 s · <span id="updated"></span></p>
+
+  <div class="bar">
+    <div class="stat"><b id="s-active">0</b><span>active sessions</span></div>
+    <div class="stat"><b id="s-players">0</b><span>connected players</span></div>
+    <div class="stat"><b id="s-ended">0</b><span>ended sessions</span></div>
+  </div>
+
+  <h2>Live sessions</h2>
+  <table>
+    <thead><tr>
+      <th>Code</th><th>Status</th><th>Players</th><th>Peak</th><th>Joins</th>
+      <th>Created</th><th>Age</th><th>Credit</th><th>Assets</th><th></th>
+    </tr></thead>
+    <tbody id="active"></tbody>
+  </table>
+
+  <h2>Ended sessions (history)</h2>
+  <table>
+    <thead><tr>
+      <th>Code</th><th>Peak</th><th>Joins</th><th>Created</th><th>Ended</th>
+      <th>Duration</th><th>Final credit</th><th>Assets</th>
+    </tr></thead>
+    <tbody id="history"></tbody>
+  </table>
+
+  <h2>Activity log</h2>
+  <div class="log">
+    <table>
+      <thead><tr><th>Time</th><th>Event</th><th>Code</th><th>Detail</th></tr></thead>
+      <tbody id="events"></tbody>
+    </table>
+  </div>
+
+  <footer>History &amp; log are in-memory and reset when the server restarts.</footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const dt = (ms) => ms ? new Date(ms).toLocaleString() : '—';
+    const tm = (ms) => ms ? new Date(ms).toLocaleTimeString() : '—';
+    const money = (n) => typeof n === 'number' ? '$' + n.toLocaleString('en-US') : '—';
+    const dur = (ms) => {
+      if (!ms || ms < 0) return '—';
+      const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      if (h) return `${h}h ${m}m`;
+      if (m) return `${m}m ${s % 60}s`;
+      return `${s}s`;
+    };
+    const assets = (a) => {
+      const e = Object.entries(a || {});
+      return e.length ? e.map(([k, n]) => `${n}×${k}`).join(' · ') : '<span class="muted">none</span>';
+    };
+    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+    function join(code) { window.open('/?room=' + encodeURIComponent(code), '_blank'); }
+    window.join = join;
+
+    function render(d) {
+      $('updated').textContent = 'updated ' + tm(d.now);
+      $('s-active').textContent = d.activeCount;
+      $('s-players').textContent = d.playerCount;
+      $('s-ended').textContent = d.history.length;
+
+      $('active').innerHTML = d.active.length ? d.active.map((s) => `
+        <tr>
+          <td class="code">${esc(s.code)}</td>
+          <td><span class="pill ${s.status}">${s.status}</span></td>
+          <td>${s.players}</td><td>${s.peakPlayers}</td><td>${s.totalJoins}</td>
+          <td>${dt(s.createdAt)}</td><td>${dur(s.ageMs)}</td>
+          <td class="money">${money(s.credit)}</td>
+          <td class="assets">${assets(s.assets)}</td>
+          <td><button class="join" onclick="join('${esc(s.code)}')">Join ▸</button></td>
+        </tr>`).join('') : '<tr><td colspan="10" class="empty">No live sessions.</td></tr>';
+
+      $('history').innerHTML = d.history.length ? d.history.map((s) => `
+        <tr>
+          <td class="code">${esc(s.code)}</td>
+          <td>${s.peakPlayers}</td><td>${s.totalJoins}</td>
+          <td>${dt(s.createdAt)}</td><td>${dt(s.endedAt)}</td>
+          <td>${dur((s.endedAt || 0) - (s.createdAt || 0))}</td>
+          <td class="money">${money(s.credit)}</td>
+          <td class="assets">${assets(s.assets)}</td>
+        </tr>`).join('') : '<tr><td colspan="8" class="empty">No ended sessions yet.</td></tr>';
+
+      $('events').innerHTML = d.events.length ? d.events.map((e) => `
+        <tr>
+          <td>${tm(e.at)}</td>
+          <td><span class="ev ${esc(e.type)}">${esc(e.type)}</span></td>
+          <td class="code">${esc(e.code)}</td>
+          <td class="muted">${'players' in e ? e.players + ' player(s)' : ''}</td>
+        </tr>`).join('') : '<tr><td colspan="4" class="empty">No activity yet.</td></tr>';
+    }
+
+    async function refresh() {
+      try {
+        const r = await fetch('/admin/api/sessions', { cache: 'no-store' });
+        if (r.ok) render(await r.json());
+      } catch { /* transient — keep the last view */ }
+    }
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
