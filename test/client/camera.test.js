@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { camera, applyCamera, toWorld, visibleRect, DPR } from '../../public/components/camera.js';
 

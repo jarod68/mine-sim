@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
 import { ORE_LABELS, COLORS, COLORS_SOLID, BLOCK_TONNAGE } from '../../public/components/mine.js';
 
