@@ -139,6 +139,11 @@ export class Roads {
     this._invalidate();
   }
 
+  // Append a single freshly-bought crusher and redraw.
+  addCrusher(c) {
+    if (c) { this.crushers.push(c); this._invalidate(); }
+  }
+
   // ── drawing ──
   key(gx, gy) { return `${gx},${gy}`; }
 
@@ -372,8 +377,9 @@ export class Roads {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     applyCamera(ctx, this.dpr);
 
-    // packed-earth "terre battue" surface (slight overlap hides sub-pixel seams)
-    ctx.fillStyle = '#a85d34';
+    // packed-earth "terre battue" surface — soft pastel clay (slight overlap
+    // hides sub-pixel seams between cells)
+    ctx.fillStyle = '#c79e84';
     for (const c of this.cells.values()) {
       if (c.parking) continue;
       ctx.fillRect(c.gx * zoneW, c.gy * zoneH, zoneW + 0.6, zoneH + 0.6);

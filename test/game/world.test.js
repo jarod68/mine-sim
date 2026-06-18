@@ -475,6 +475,30 @@ describe('World — shop, assignment, manual control', () => {
     expect(w.buyAsset('T264').error).toBe('credit');
   });
 
+  it('buys and places an extra crusher for $1,000,000', () => {
+    w.credit = 3000000;
+    const before = w.crushers.length;
+    const r = w.buyCrusher(100, 90);
+    expect(r.ok).toBe(true);
+    expect(r.credit).toBe(2000000);
+    expect(r.extraCrushers).toBe(1);
+    expect(w.crushers.length).toBe(before + 1);
+    expect(w.crushers.at(-1)).toEqual({ x: 100, y: 90, w: 2, h: 2 });
+    expect(w.fullState().crushers.some((c) => c.x === 100 && c.y === 90)).toBe(true);
+  });
+
+  it('caps extra crushers at 5 and rejects when broke or overlapping', () => {
+    w.credit = 1e9;
+    for (let i = 0; i < 5; i++) expect(w.buyCrusher(20 + i * 4, 90).ok).toBe(true);
+    expect(w.buyCrusher(60, 90).error).toBe('max');           // 6th rejected
+    const w2 = new World();
+    w2.credit = 10;
+    expect(w2.buyCrusher(100, 90).error).toBe('credit');
+    w2.credit = 1e9;
+    expect(w2.buyCrusher(100, 90).ok).toBe(true);
+    expect(w2.buyCrusher(101, 91).error).toBe('blocked');     // overlaps the previous one
+  });
+
   it('assigns a truck to a shovel and clears the link with null', () => {
     w.assign('OHT01', 'HEX01');
     expect(w.autopilot.assignedShovel(w.byLabel.get('OHT01')).label).toBe('HEX01');

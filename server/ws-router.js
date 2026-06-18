@@ -103,6 +103,12 @@ function handleMessage(ws, raw, rooms) {
       if (r.ok) roomBroadcast(room, { t: 'vehicle', vehicle: r.vehicle });
       break;
     }
+    case 'buyCrusher': {
+      const r = world.buyCrusher(m.gx, m.gy);
+      send(ws, { t: 'crusherBought', ok: r.ok, error: r.error, credit: r.credit, extraCrushers: r.extraCrushers });
+      if (r.ok) roomBroadcast(room, { t: 'crusher', crusher: r.crusher, extraCrushers: r.extraCrushers });
+      break;
+    }
     case 'reset':
       world.reset();
       roomBroadcast(room, { t: 'state', state: world.fullState() });

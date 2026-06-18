@@ -13,8 +13,10 @@ export class Net {
     this.onJoined = null;    // (code) => void
     this.onJoinError = null; // (reason) => void
     this.onVehicle = null;   // (vehicle) => void  — a new asset was bought
+    this.onCrusher = null;   // (crusher, extraCrushers) => void  — a crusher was placed
     this._pendingDrill = new Map();
     this._buyQ = [];         // FIFO resolvers for buy() acknowledgements
+    this._crusherQ = [];     // FIFO resolvers for buyCrusher() acknowledgements
     this._queue = [];        // commands buffered until the socket is open
     this._connect();
   }
@@ -48,6 +50,11 @@ export class Net {
       const r = this._buyQ.shift();
       if (r) r(m);
     }
+    else if (m.t === 'crusher') this.onCrusher?.(m.crusher, m.extraCrushers);
+    else if (m.t === 'crusherBought') {
+      const r = this._crusherQ.shift();
+      if (r) r(m);
+    }
   }
 
   _send(o) {
@@ -76,6 +83,18 @@ export class Net {
       setTimeout(() => {
         const i = this._buyQ.indexOf(resolve);
         if (i >= 0) { this._buyQ.splice(i, 1); resolve(null); }
+      }, 3000);
+    });
+  }
+
+  // Buy + place a crusher at (gx,gy); resolves with { ok, credit, extraCrushers } or { error }.
+  buyCrusher(gx, gy) {
+    return new Promise((resolve) => {
+      this._crusherQ.push(resolve);
+      this._send({ t: 'buyCrusher', gx, gy });
+      setTimeout(() => {
+        const i = this._crusherQ.indexOf(resolve);
+        if (i >= 0) { this._crusherQ.splice(i, 1); resolve(null); }
       }, 3000);
     });
   }

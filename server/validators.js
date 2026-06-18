@@ -55,6 +55,10 @@ function validateCommand(m, bounds) {
     case 'buy':
       return isStr(m.id) ? { t: 'buy', id: m.id } : null;
 
+    case 'buyCrusher':
+      return isInt(m.gx) && isInt(m.gy) && inRange(m.gx, bounds.zoneCols) && inRange(m.gy, bounds.zoneRows)
+        ? { t: 'buyCrusher', gx: m.gx, gy: m.gy } : null;
+
     case 'reset':
       return { t: 'reset' };
 

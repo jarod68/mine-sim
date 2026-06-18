@@ -65,6 +65,10 @@ const EXCAVATORS = {
 // (3 ⇒ at least two empty blocks between them, so shovels never spawn stacked).
 const SHOVEL_MIN_BLOCK_DIST = 3;
 
+// Extra crushers the player can buy and place, beyond the ones generated at start.
+const CRUSHER_PRICE = 1000000;
+const MAX_EXTRA_CRUSHERS = 5;
+
 // Buyable assets (shop). Prices in $.
 const MAX_ASSETS = 150;
 const CATALOG = [
@@ -259,6 +263,10 @@ const STUCK_DODGE = 24;           // …and after this, if a SHOVEL is the block
 const DIST_CACHE_MAX = 64;        // cap distinct cached distance fields
 
 const key = (gx, gy) => `${gx},${gy}`;
+
+// Do two sub-zone rectangles { x, y, w, h } overlap?
+const rectsOverlap = (a, b) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 // Minimal binary min-heap keyed by `.f` (used by the move-to A* planner).
 class MinHeap {
@@ -1352,6 +1360,9 @@ class World {
 
     // Per-vehicle "move to point" orders (vehicle → { gx, gy, path, i, stuck }).
     this._moveTo = new Map();
+    this._boughtCrushers = 0;   // extra crushers the player has purchased
+
+
 
     // Delta-broadcast baselines (last values sent to clients).
     this._lastVeh = new Map();
@@ -1704,6 +1715,31 @@ class World {
     return { ok: true, credit: this.credit, label: v.label, vehicle: this._vehicle(v) };
   }
 
+  // Buy and place an extra crusher (2×2 sub-zones) at (gx,gy). Up to
+  // MAX_EXTRA_CRUSHERS, CRUSHER_PRICE each. Rejected if out of slots, unaffordable,
+  // or overlapping the parking / another crusher. Returns { ok, credit, crusher,
+  // extraCrushers } or { error, credit }.
+  buyCrusher(gx, gy) {
+    if (this._boughtCrushers >= MAX_EXTRA_CRUSHERS) return { error: 'max', credit: this.credit };
+    if (this.credit < CRUSHER_PRICE) return { error: 'credit', credit: this.credit };
+    const { zoneCols, zoneRows } = this.grid;
+    const x = Math.max(0, Math.min(zoneCols - 2, Math.round(Number(gx))));
+    const y = Math.max(0, Math.min(zoneRows - 2, Math.round(Number(gy))));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { error: 'invalid', credit: this.credit };
+    const rect = { x, y, w: 2, h: 2 };
+    const p = this.roads.parkings[0];
+    if (p && rectsOverlap(rect, p)) return { error: 'blocked', credit: this.credit };
+    for (const c of this.crushers) if (rectsOverlap(rect, c)) return { error: 'blocked', credit: this.credit };
+
+    this.credit -= CRUSHER_PRICE;
+    this._boughtCrushers += 1;
+    this.crushers.push(rect);
+    this.roads.setCrushers(this.crushers);
+    this.autopilot._bayCache = null;        // new dump bays
+    this.autopilot._distCache.clear();
+    return { ok: true, credit: this.credit, crusher: rect, extraCrushers: this._boughtCrushers };
+  }
+
   // Next free label for a prefix (OHT, HEX, LV) → e.g. "OHT05".
   _nextLabel(prefix) {
     let max = 0;
@@ -1778,6 +1814,9 @@ class World {
       crushers: this.crushers,
       catalog: CATALOG,
       maxAssets: MAX_ASSETS,
+      crusherPrice: CRUSHER_PRICE,
+      extraCrushers: this._boughtCrushers,
+      maxExtraCrushers: MAX_EXTRA_CRUSHERS,
       roads: this.roads.serialize(),
       vehicles: this.vehicles.map((v) => this._vehicle(v)),
       blocks: this.mine.blocks.map((row) => row.map((b) => this._publicBlock(b))),

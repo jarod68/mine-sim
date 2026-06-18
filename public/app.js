@@ -26,6 +26,9 @@ let built = false;
 let creditValue = 0;
 let catalog = [];
 let maxAssets = 150;
+let crusherPrice = 1000000;
+let extraCrushers = 0;
+let maxExtraCrushers = 5;
 let grid = null;             // sub-zone grid metrics (set in build)
 let parkRect = null;         // current parking pad rect (sub-zones)
 let selectedBlock = null;    // last clicked block (target of the "X" drill shortcut)
@@ -48,6 +51,13 @@ net.onRoads = (cells) => { if (roads) roads.setNetwork(cells); };
 net.onVehicle = (v) => {           // a newly bought asset (no full-state reload)
   if (!fleet || !v) return;
   fleet.sync([v]);
+  if (!shopEl.hidden) renderShop();
+};
+net.onCrusher = (crusher, extra) => {   // a freshly placed crusher
+  if (!roads) return;
+  roads.addCrusher(crusher);
+  if (typeof extra === 'number') extraCrushers = extra;
+  invalidateRoads();
   if (!shopEl.hidden) renderShop();
 };
 
@@ -156,6 +166,9 @@ function build(state) {
   drillCost = state.drillCost;
   catalog = state.catalog || [];
   maxAssets = state.maxAssets || 150;
+  if (state.crusherPrice) crusherPrice = state.crusherPrice;
+  if (typeof state.extraCrushers === 'number') extraCrushers = state.extraCrushers;
+  if (state.maxExtraCrushers) maxExtraCrushers = state.maxExtraCrushers;
   setCredit(state.credit);
   game = new GameCanvas(canvas, state, onBlockClick);
   blockW = VIEW_W / state.cols;
@@ -200,6 +213,17 @@ function build(state) {
       e.stopPropagation();
       return;
     }
+    // Crusher placement: the next click after buying one positions it.
+    if (crusherPlaceMode) {
+      if (grid) {
+        const gx = Math.max(0, Math.min(grid.zoneCols - 2, Math.floor(w.x / grid.zoneW)));
+        const gy = Math.max(0, Math.min(grid.zoneRows - 2, Math.floor(w.y / grid.zoneH)));
+        net.buyCrusher(gx, gy).then((r) => { if (r && r.ok) setCredit(r.credit); });
+      }
+      exitCrusherPlace();
+      e.stopPropagation();
+      return;
+    }
     const v = fleet.selectAt(w.x, w.y);
     if (v) { e.stopPropagation(); popup.hide(); closeParkResize(); selectedBlock = null; return; }   // selecting an asset closes the drill popup
     fleet.setSelected(null);
@@ -231,6 +255,7 @@ function refresh(state) {
   drillCost = state.drillCost;
   catalog = state.catalog || catalog;
   maxAssets = state.maxAssets || maxAssets;
+  if (typeof state.extraCrushers === 'number') extraCrushers = state.extraCrushers;
   game.setMine(state);
   roads.setCrushers(state.crushers);
   // Reload the server's road network WITHOUT firing onChange. But if we have a
@@ -481,8 +506,34 @@ window.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
   if (e.key === 'w' || e.key === 'W') moveMode ? exitMoveMode() : enterMoveMode();
-  else if (e.key === 'Escape') exitMoveMode();
+  else if (e.key === 'Escape') { exitMoveMode(); exitCrusherPlace(); }
 });
+
+// ── Crusher placement mode ──
+// Buying a crusher from the shop arms this; the next map click places it.
+let crusherPlaceMode = false;
+function enterCrusherPlace() {
+  if (!roads) return;
+  exitMoveMode();
+  crusherPlaceMode = true;
+  canvas.style.cursor = 'cell';
+  showHint(`Click the map to place the crusher (${money(crusherPrice)}) · Esc to cancel`);
+}
+function exitCrusherPlace() {
+  if (!crusherPlaceMode) return;
+  crusherPlaceMode = false;
+  canvas.style.cursor = '';
+  hideHint();
+}
+
+// ── Floating hint banner ──
+let hintEl = null;
+function showHint(text) {
+  if (!hintEl) { hintEl = document.createElement('div'); hintEl.className = 'place-hint'; document.querySelector('main').appendChild(hintEl); }
+  hintEl.textContent = text;
+  hintEl.hidden = false;
+}
+function hideHint() { if (hintEl) hintEl.hidden = true; }
 
 // Update live values without rebuilding the panel (keeps the dropdown stable).
 function updateAssetLive() {
@@ -524,6 +575,20 @@ function renderShop() {
       </div>`;
   }).join('');
 
+  // Extra crusher — buy then click the map to place it.
+  const crusherFull = extraCrushers >= maxExtraCrushers;
+  const crusherAfford = creditValue >= crusherPrice;
+  const crusherReason = crusherFull ? 'Max reached' : !crusherAfford ? 'Not enough $' : 'Place…';
+  const crusherRow = `
+    <div class="shop-row">
+      <div class="shop-info">
+        <b>Crusher</b>
+        <span class="shop-spec">Extra dump site — click the map to place it (${extraCrushers}/${maxExtraCrushers})</span>
+      </div>
+      <div class="shop-price">${money(crusherPrice)}</div>
+      <button class="shop-buy" id="shop-buy-crusher"${crusherFull || !crusherAfford ? ' disabled' : ''}>${crusherReason}</button>
+    </div>`;
+
   shopEl.innerHTML = `
     <div class="shop-card">
       <header class="shop-head">
@@ -532,10 +597,15 @@ function renderShop() {
         <button class="shop-close" aria-label="Close">×</button>
       </header>
       ${rows}
+      ${crusherRow}
     </div>`;
 
   shopEl.querySelector('.shop-close').addEventListener('click', closeShop);
   for (const btn of shopEl.querySelectorAll('.shop-buy')) {
+    if (btn.id === 'shop-buy-crusher') {
+      btn.addEventListener('click', () => { closeShop(); enterCrusherPlace(); });
+      continue;
+    }
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       const r = await net.buy(btn.dataset.id);

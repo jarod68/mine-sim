@@ -81,7 +81,8 @@ the view so you can extend far. **🧽 Eraser** removes road (parking pads stay)
 ### Fleet
 
 Click **🛒 Buy assets** to expand the fleet (haul trucks, shovels, a scout), up to
-150 vehicles. A new shovel never spawns within 2 blocks of another.
+150 vehicles. A new shovel never spawns within 2 blocks of another. You can also
+buy **extra crushers** (up to 5, $1,000,000 each) and click the map to place them.
 
 ![Buy-assets shop](docs/screenshots/shop.png)
 
@@ -271,6 +272,7 @@ the road array bounds-capped.
 | `select` | `label`, `on` | Mark a shovel selected (pauses its auto-relocation). |
 | `debug` | `label`, `on` | Toggle the vehicle's debug-path overlay. |
 | `buy` | `id` | Buy an asset from the catalog. |
+| `buyCrusher` | `gx`, `gy` | Buy + place an extra crusher (up to 5, $1M each). |
 | `reset` | — | Regenerate the room's world. |
 | `resizeParking` | `rect: { x, y, w, h }` | Resize the parking pad (sub-zones). |
 
@@ -285,6 +287,7 @@ the road array bounds-capped.
 | `roads` | `cells` | Broadcast to *other* clients after a road edit. |
 | `bought` | `id, ok, error, credit, label` | Reply to `buy`. |
 | `vehicle` | `vehicle` | Broadcast after a successful `buy`. |
+| `crusher` | `crusher, extraCrushers` | Broadcast after a crusher is placed. |
 | `live` | `vehicles[], blocks[], credit?, debug?` | Per-tick delta (15 Hz); only changed fields. |
 
 The full **`state`** snapshot carries: `cols`, `rows`, `view {w,h}`,
