@@ -74,6 +74,20 @@ body {
   padding: 1px 4px;
   font-size: 12px;
 }
+.asset-btn {
+  background: #2563c9;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.asset-btn:hover { background: #2f74e0; }
+.asset-btn.active { background: #f2b81c; color: #14161a; }
 
 h1 {
   font-size: 20px;

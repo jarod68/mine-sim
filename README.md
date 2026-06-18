@@ -91,6 +91,9 @@ Click **🛒 Buy assets** to expand the fleet (haul trucks, shovels, a scout), u
 - **Click a vehicle** for details — assign a truck to a shovel, toggle its debug
   path. **Drive manually** with the arrow keys (light vehicles move diagonally);
   haul trucks otherwise run on autopilot.
+- **Move to a point:** with a vehicle selected, press <kbd>W</kbd> (or the
+  **🎯 Move to…** button), then click a destination — it routes there via the
+  shortest path, on roads and off-road where needed.
 - **Click the parking pad** to show resize handles; drag a side to grow/shrink it
   (roads under the new pad are trimmed automatically).
 
@@ -263,6 +266,7 @@ the road array bounds-capped.
 | `drill` | `x, y` | Drill a block (block coords); charges the drill cost. |
 | `roads` | `cells: [{ gx, gy, dir }]` | Replace the drawn network (sub-zone cells, optional one-way `dir`). |
 | `control` | `label`, `dir` \| `release` | Manually drive a vehicle, or hand it back to the autopilot. |
+| `moveTo` | `label`, `gx`, `gy` | Route a vehicle to a sub-zone cell via the shortest path (roads + off-road). |
 | `assign` | `truck`, `shovel` | Assign a haul truck to a shovel (or `null`). |
 | `select` | `label`, `on` | Mark a shovel selected (pauses its auto-relocation). |
 | `debug` | `label`, `on` | Toggle the vehicle's debug-path overlay. |

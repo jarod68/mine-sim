@@ -260,6 +260,31 @@ const DIST_CACHE_MAX = 64;        // cap distinct cached distance fields
 
 const key = (gx, gy) => `${gx},${gy}`;
 
+// Minimal binary min-heap keyed by `.f` (used by the move-to A* planner).
+class MinHeap {
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(item) {
+    const a = this.a; a.push(item);
+    let i = a.length - 1;
+    while (i > 0) { const p = (i - 1) >> 1; if (a[p].f <= a[i].f) break; [a[p], a[i]] = [a[i], a[p]]; i = p; }
+  }
+  pop() {
+    const a = this.a, top = a[0], last = a.pop();
+    if (a.length) {
+      a[0] = last; let i = 0; const n = a.length;
+      for (;;) {
+        let s = i; const l = 2 * i + 1, r = 2 * i + 2;
+        if (l < n && a[l].f < a[s].f) s = l;
+        if (r < n && a[r].f < a[s].f) s = r;
+        if (s === i) break;
+        [a[s], a[i]] = [a[i], a[s]]; i = s;
+      }
+    }
+    return top;
+  }
+}
+
 class Autopilot {
   constructor(grid, roads, hooks) {
     this.grid = grid;
@@ -1325,6 +1350,9 @@ class World {
     this.autopilot.assign(oht4, hex2);
     this.autopilot.setEnabled(true);
 
+    // Per-vehicle "move to point" orders (vehicle → { gx, gy, path, i, stuck }).
+    this._moveTo = new Map();
+
     // Delta-broadcast baselines (last values sent to clients).
     this._lastVeh = new Map();
     this._lastCredit = null;
@@ -1419,7 +1447,9 @@ class World {
     this.autopilot.update(dt);
     for (const v of this.vehicles) {
       let dir = null;
-      if (v.manual && v.manualDir) dir = v.manualDir;
+      const mv = this._moveStep(v);                 // "move to point" override
+      if (mv !== undefined) dir = mv;
+      else if (v.manual && v.manualDir) dir = v.manualDir;
       else if (this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
       v.update(dt, dir, this.grid, isRoad, isFree);
     }
@@ -1508,16 +1538,127 @@ class World {
   control(label, { dir, release } = {}) {
     const v = this.byLabel.get(label);
     if (!v) return;
+    this._moveTo.delete(v);                 // any manual input cancels a move order
     if (release) {
       // Deselecting hands any asset back to the autopilot — a shovel that was
       // driven manually resumes its automatic relocation once released.
-      v.manual = false; v.manualDir = null;
+      v.manual = false; v.manualDir = null; v.offroad = false;
       this.autopilot.clearManual(v);
       return;
     }
     v.manual = true;
     v.manualDir = Array.isArray(dir) ? dir : null;
     this.autopilot.setManual(v);
+  }
+
+  // ── "Move to point" ──────────────────────────────────────────────────────────
+  // Send a vehicle to a sub-zone cell via the shortest path, preferring roads but
+  // cutting off-road when necessary. Works for any vehicle type and takes over
+  // from both the haul autopilot and manual driving until it arrives.
+  moveTo(label, gx, gy) {
+    const v = this.byLabel.get(label);
+    if (!v) return;
+    const { zoneCols, zoneRows } = this.grid;
+    gx = Math.max(0, Math.min(zoneCols - 1, Math.round(Number(gx))));
+    gy = Math.max(0, Math.min(zoneRows - 1, Math.round(Number(gy))));
+    if (!Number.isFinite(gx) || !Number.isFinite(gy)) return;
+    v.manual = false; v.manualDir = null;
+    this.autopilot.setManual(v);            // pause hauling/relocation while it drives there
+    const path = this._planMovePath(v, gx, gy);
+    if (!path || path.length <= 1) { this._moveTo.delete(v); this.autopilot.clearManual(v); v.offroad = false; return; }
+    this._moveTo.set(v, { gx, gy, path, i: 1, stuck: 0, from: null });
+  }
+
+  // Drive one step of an active move order, or undefined if the vehicle has none.
+  _moveStep(v) {
+    const st = this._moveTo.get(v);
+    if (!st) return undefined;
+    v.offroad = true;                       // road-only trucks may leave the road for this
+    if (v.moving) return null;              // finish the current hop (update lerps it)
+    const cur = { gx: v.gx, gy: v.gy };
+    if (cur.gx === st.gx && cur.gy === st.gy) { this._endMove(v); return null; }
+
+    // Stuck detection: if we didn't move since the last order, count it.
+    if (st.from && st.from.gx === cur.gx && st.from.gy === cur.gy) st.stuck++; else st.stuck = 0;
+    while (st.i < st.path.length && st.path[st.i].gx === cur.gx && st.path[st.i].gy === cur.gy) st.i++;
+    if (st.i >= st.path.length) { this._endMove(v); return null; }
+    if (st.stuck > 18) {                    // blocked → replan around it, or give up
+      const path = this._planMovePath(v, st.gx, st.gy);
+      if (!path || path.length <= 1) { this._endMove(v); return null; }
+      st.path = path; st.i = 1; st.stuck = 0;
+    }
+    const next = st.path[st.i];
+    st.from = cur;
+    return [Math.sign(next.gx - cur.gx), Math.sign(next.gy - cur.gy)];
+  }
+
+  _endMove(v) {
+    this._moveTo.delete(v);
+    v.offroad = false;
+    this.autopilot.clearManual(v);          // resume hauling / shovel relocation
+  }
+
+  // Weighted A* over the sub-zone grid from the vehicle to (tgx,tgy). Road cells
+  // cost 1, off-road cells more, so the route sticks to roads and only cuts
+  // off-road where it must. Crusher footprints are walls. Returns a cell path
+  // (start→target) or null if unreachable.
+  _planMovePath(v, tgx, tgy) {
+    const { zoneCols, zoneRows } = this.grid;
+    const sgx = v.moving ? v.tgx : v.gx;
+    const sgy = v.moving ? v.tgy : v.gy;
+    if (sgx === tgx && sgy === tgy) return null;
+    const walls = this._crusherCells();
+    walls.delete(key(tgx, tgy));            // allow targeting onto a crusher edge
+    if (walls.has(key(tgx, tgy))) return null;
+    // Cells currently occupied by OTHER vehicles — strongly avoided so the route
+    // goes around them, but not forbidden (they move; per-step waiting/replanning
+    // handles the rest).
+    const occ = new Set();
+    for (const o of this.vehicles) {
+      if (o === v) continue;
+      for (const c of o.occupiedCells(this.grid)) occ.add(key(c.gx, c.gy));
+    }
+    occ.delete(key(tgx, tgy));
+    const OFFROAD = 4;                      // off-road step cost (roads cost 1)
+    const BUSY = 60;                        // penalty for a cell another vehicle holds
+    const id = (gx, gy) => gy * zoneCols + gx;
+    const g = new Map();
+    const came = new Map();
+    const open = new MinHeap();
+    const sId = id(sgx, sgy);
+    g.set(sId, 0);
+    open.push({ f: Math.abs(tgx - sgx) + Math.abs(tgy - sgy), g: 0, id: sId, gx: sgx, gy: sgy });
+
+    let found = null, guard = 0;
+    while (open.size && guard++ < 120000) {
+      const cur = open.pop();
+      if (cur.g > (g.get(cur.id) ?? Infinity)) continue;   // stale heap entry
+      if (cur.gx === tgx && cur.gy === tgy) { found = cur.id; break; }
+      for (const [dx, dy] of DIRS) {
+        const nx = cur.gx + dx, ny = cur.gy + dy;
+        if (nx < 0 || ny < 0 || nx >= zoneCols || ny >= zoneRows) continue;
+        if (walls.has(key(nx, ny))) continue;
+        const k = key(nx, ny);
+        const ng = cur.g + (this.roads.isRoad(nx, ny) ? 1 : OFFROAD) + (occ.has(k) ? BUSY : 0);
+        const nId = id(nx, ny);
+        if (ng >= (g.get(nId) ?? Infinity)) continue;
+        g.set(nId, ng);
+        came.set(nId, cur.id);
+        open.push({ f: ng + Math.abs(tgx - nx) + Math.abs(tgy - ny), g: ng, id: nId, gx: nx, gy: ny });
+      }
+    }
+    if (found === null) return null;
+    const path = [];
+    for (let i = found; i !== undefined; i = came.get(i)) path.push({ gx: i % zoneCols, gy: Math.floor(i / zoneCols) });
+    return path.reverse();
+  }
+
+  _crusherCells() {
+    const s = new Set();
+    for (const c of this.crushers)
+      for (let gy = c.y; gy < c.y + c.h; gy++)
+        for (let gx = c.x; gx < c.x + c.w; gx++) s.add(key(gx, gy));
+    return s;
   }
 
   assign(truckLabel, shovelLabel) {

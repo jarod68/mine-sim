@@ -48,6 +48,13 @@ describe('validators — commands', () => {
     expect(validateCommand({ t: 'control', dir: [1, 0] }, bounds)).toBeNull(); // no label
   });
 
+  it('bounds-checks a move-to target', () => {
+    expect(validateCommand({ t: 'moveTo', label: 'OHT01', gx: 5, gy: 4 }, bounds))
+      .toEqual({ t: 'moveTo', label: 'OHT01', gx: 5, gy: 4 });
+    expect(validateCommand({ t: 'moveTo', label: 'OHT01', gx: 99, gy: 4 }, bounds)).toBeNull();
+    expect(validateCommand({ t: 'moveTo', gx: 5, gy: 4 }, bounds)).toBeNull();   // no label
+  });
+
   it('requires strings for label/id/truck and coerces a rect', () => {
     expect(validateCommand({ t: 'assign', truck: 'OHT01', shovel: 'HEX01' }, bounds))
       .toEqual({ t: 'assign', truck: 'OHT01', shovel: 'HEX01' });

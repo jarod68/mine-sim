@@ -556,6 +556,36 @@ describe('World — collisions & live deltas', () => {
     expect(w.vehicles.length).toBe(9);
   });
 
+  it('drives a vehicle to a target point via move-to (on/off road)', () => {
+    const w = new World();
+    const lv = w.byLabel.get('LV01');           // scout (free off-road)
+    w.moveTo('LV01', 90, 70);
+    expect(w._moveTo.has(lv)).toBe(true);
+    let done = false;
+    for (let i = 0; i < 8000 && !done; i++) { w.tick(1 / 30); done = !w._moveTo.has(lv); }
+    expect(done).toBe(true);                      // order cleared = arrived
+    expect([lv.gx, lv.gy]).toEqual([90, 70]);
+  });
+
+  it('also routes a road-only haul truck (off-road where needed)', () => {
+    const w = new World();
+    const oht = w.byLabel.get('OHT01');
+    w.moveTo('OHT01', 55, 64);
+    let done = false;
+    for (let i = 0; i < 9000 && !done; i++) { w.tick(1 / 30); done = !w._moveTo.has(oht); }
+    expect(done).toBe(true);
+    expect([oht.gx, oht.gy]).toEqual([55, 64]);
+  });
+
+  it('manual driving cancels an active move order', () => {
+    const w = new World();
+    const lv = w.byLabel.get('LV01');
+    w.moveTo('LV01', 90, 70);
+    expect(w._moveTo.has(lv)).toBe(true);
+    w.control('LV01', { dir: [1, 0] });
+    expect(w._moveTo.has(lv)).toBe(false);
+  });
+
   it('addCredit grants money and never goes below zero', () => {
     w.credit = 100000;
     expect(w.addCredit(100000)).toBe(200000);

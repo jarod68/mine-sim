@@ -41,6 +41,11 @@ function validateCommand(m, bounds) {
       return isStr(m.truck)
         ? { t: 'assign', truck: m.truck, shovel: isStr(m.shovel) ? m.shovel : null } : null;
 
+    case 'moveTo':
+      return isStr(m.label) && isInt(m.gx) && isInt(m.gy)
+        && inRange(m.gx, bounds.zoneCols) && inRange(m.gy, bounds.zoneRows)
+        ? { t: 'moveTo', label: m.label, gx: m.gx, gy: m.gy } : null;
+
     case 'debug':
       return isStr(m.label) ? { t: 'debug', label: m.label, on: !!m.on } : null;
 

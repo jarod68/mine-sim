@@ -93,6 +93,7 @@ function handleMessage(ws, raw, rooms) {
       break;
     }
     case 'control': world.control(m.label, { dir: m.dir, release: m.release }); break;
+    case 'moveTo':  world.moveTo(m.label, m.gx, m.gy); break;
     case 'assign':  world.assign(m.truck, m.shovel); break;
     case 'debug':   world.setDebug(m.label, m.on); break;
     case 'select':  world.select(m.label, m.on); break;

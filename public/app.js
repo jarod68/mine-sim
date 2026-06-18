@@ -186,6 +186,20 @@ function build(state) {
   canvas.addEventListener('click', (e) => {
     const rect = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX, e.clientY, rect);
+    // "Move to point": the next click after pressing W / the asset button picks
+    // the destination for the selected vehicle.
+    if (moveMode) {
+      const sel = fleet.selected;
+      if (sel && grid) {
+        const gx = Math.max(0, Math.min(grid.zoneCols - 1, Math.floor(w.x / grid.zoneW)));
+        const gy = Math.max(0, Math.min(grid.zoneRows - 1, Math.floor(w.y / grid.zoneH)));
+        net.moveTo(sel.label, gx, gy);
+        fleet.setMoveMarker(sel.label, w.x, w.y);
+      }
+      exitMoveMode();
+      e.stopPropagation();
+      return;
+    }
     const v = fleet.selectAt(w.x, w.y);
     if (v) { e.stopPropagation(); popup.hide(); closeParkResize(); selectedBlock = null; return; }   // selecting an asset closes the drill popup
     fleet.setSelected(null);
@@ -414,12 +428,19 @@ function renderAsset(v) {
   }
 
   parts.push(`<span class="ai"><i>Debug</i><input type="checkbox" id="asset-debug"${debugOn.has(v.label) ? ' checked' : ''}></span>`);
+  parts.push('<button id="asset-moveto" class="asset-btn" title="Then click a destination on the map (shortcut: W)">🎯 Move to…</button>');
 
   assetEl.innerHTML = `<span class="atitle">Asset</span>${parts.join('')}`;
 
   const sel = assetEl.querySelector('#asset-shovel');
   if (sel) {
     sel.addEventListener('change', (e) => net.assign(v.label, e.target.value || null));
+  }
+
+  const mv = assetEl.querySelector('#asset-moveto');
+  if (mv) {
+    mv.addEventListener('click', () => (moveMode ? exitMoveMode() : enterMoveMode()));
+    if (moveMode) markMoveButton(true);   // keep the button state when the panel rebuilds
   }
 
   const dbg = assetEl.querySelector('#asset-debug');
@@ -432,6 +453,36 @@ function renderAsset(v) {
     });
   }
 }
+
+// ── "Move to point" mode ──
+// Press W (or the asset button) with a vehicle selected, then click a destination
+// on the map; the server routes the vehicle there via the shortest path (on roads,
+// off-road where needed).
+let moveMode = false;
+function markMoveButton(on) {
+  const b = assetEl.querySelector('#asset-moveto');
+  if (!b) return;
+  b.textContent = on ? '🎯 Click a destination…' : '🎯 Move to…';
+  b.classList.toggle('active', on);
+}
+function enterMoveMode() {
+  if (!fleet || !fleet.selected) return;
+  moveMode = true;
+  canvas.style.cursor = 'cell';
+  markMoveButton(true);
+}
+function exitMoveMode() {
+  if (!moveMode) return;
+  moveMode = false;
+  canvas.style.cursor = '';
+  markMoveButton(false);
+}
+window.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if (e.key === 'w' || e.key === 'W') moveMode ? exitMoveMode() : enterMoveMode();
+  else if (e.key === 'Escape') exitMoveMode();
+});
 
 // Update live values without rebuilding the panel (keeps the dropdown stable).
 function updateAssetLive() {

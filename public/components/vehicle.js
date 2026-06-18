@@ -150,6 +150,7 @@ export class Fleet {
     this.onControl = null;        // (label, { dir }|{ release }) → POST /api/control
     this.onSelect = null;         // (vehicle|null) → UI hook
     this.debugPaths = {};         // { label: { path:[{gx,gy}], goals:[{gx,gy}] } }
+    this.moveMarkers = new Map(); // label → { x, y } destination flag for a move-to order
     this.pressed = new Set();
     this._manualLabel = null;     // label we're currently driving manually
     this._lastKey = null;
@@ -271,6 +272,7 @@ export class Fleet {
     }
 
     this._drawDebug(ctx);
+    this._drawMoveMarkers(ctx);
 
     // Cull vehicles outside the viewport (cheap when zoomed in). The lerp still
     // runs for everyone so positions stay correct when they scroll back in.
@@ -285,6 +287,35 @@ export class Fleet {
     }
 
     requestAnimationFrame(this._loop);
+  }
+
+  // Flag a move-to destination (world coords) for a vehicle, drawn until it
+  // arrives there or is taken over by manual driving.
+  setMoveMarker(label, x, y) { this.moveMarkers.set(label, { x, y }); }
+
+  // Reticle + leader line at each active move-to destination.
+  _drawMoveMarkers(ctx) {
+    if (!this.moveMarkers.size) return;
+    const s = Math.min(this.grid.zoneW, this.grid.zoneH);
+    for (const [label, m] of this.moveMarkers) {
+      const v = this.byLabel.get(label);
+      if (!v || this._manualLabel === label || Math.hypot(v.x - m.x, v.y - m.y) < s * 1.2) {
+        this.moveMarkers.delete(label);   // gone / overridden / arrived
+        continue;
+      }
+      ctx.save();
+      ctx.strokeStyle = 'rgba(108, 182, 255, 0.9)';
+      ctx.lineWidth = Math.max(1, s * 0.08);
+      ctx.setLineDash([s * 0.4, s * 0.3]);
+      ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(m.x, m.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(m.x, m.y, s * 0.5, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(m.x - s * 0.75, m.y); ctx.lineTo(m.x + s * 0.75, m.y);
+      ctx.moveTo(m.x, m.y - s * 0.75); ctx.lineTo(m.x, m.y + s * 0.75);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // Debug overlay: neon-green continuous line through the planned route cells,
