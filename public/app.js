@@ -25,7 +25,7 @@ let blockH = 0;
 let built = false;
 let creditValue = 0;
 let catalog = [];
-let maxAssets = 25;
+let maxAssets = 150;
 let grid = null;             // sub-zone grid metrics (set in build)
 let parkRect = null;         // current parking pad rect (sub-zones)
 let selectedBlock = null;    // last clicked block (target of the "X" drill shortcut)
@@ -155,7 +155,7 @@ function build(state) {
   paintLegend();
   drillCost = state.drillCost;
   catalog = state.catalog || [];
-  maxAssets = state.maxAssets || 25;
+  maxAssets = state.maxAssets || 150;
   setCredit(state.credit);
   game = new GameCanvas(canvas, state, onBlockClick);
   blockW = VIEW_W / state.cols;
@@ -541,7 +541,7 @@ function renderShop() {
       const r = await net.buy(btn.dataset.id);
       if (r && r.ok) setCredit(r.credit);          // new asset arrives via the broadcast state
       else if (r && r.error === 'credit') flashShop('Not enough credit');
-      else if (r && r.error === 'max') flashShop('Maximum 25 assets reached');
+      else if (r && r.error === 'max') flashShop(`Maximum ${maxAssets} assets reached`);
       renderShop();
     });
   }

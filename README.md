@@ -81,7 +81,7 @@ the view so you can extend far. **🧽 Eraser** removes road (parking pads stay)
 ### Fleet
 
 Click **🛒 Buy assets** to expand the fleet (haul trucks, shovels, a scout), up to
-25 vehicles. A new shovel never spawns within 2 blocks of another.
+150 vehicles. A new shovel never spawns within 2 blocks of another.
 
 ![Buy-assets shop](docs/screenshots/shop.png)
 

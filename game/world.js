@@ -66,7 +66,7 @@ const EXCAVATORS = {
 const SHOVEL_MIN_BLOCK_DIST = 3;
 
 // Buyable assets (shop). Prices in $.
-const MAX_ASSETS = 25;
+const MAX_ASSETS = 150;
 const CATALOG = [
   { id: 'LV',    type: 'pickup',    model: 'Light Utility Vehicle', price: 25000,  spec: 'Manual scout vehicle' },
   { id: 'T264',  type: 'oht',       model: 'Liebherr T264',         price: 100000, spec: 'Haul truck — 240 t payload' },
