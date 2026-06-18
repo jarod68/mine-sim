@@ -11,6 +11,7 @@
     <div id="asset-details" class="asset"></div>
     <span id="room-badge" class="room-badge" hidden></span>
     <div class="credit" id="credit">$0</div>
+    <button id="about-btn" class="shop-btn about-btn">❓ How to play</button>
     <button id="shop-btn" class="shop-btn">🛒 Buy assets</button>
     <div class="tools">
       <ul class="legend">
@@ -37,6 +38,57 @@
   </main>
 
   <div id="shop" class="shop-modal" hidden></div>
+
+  <div id="about" class="shop-modal" hidden>
+    <div class="about-card">
+      <header class="about-head">
+        <span>⛏ Mine Sim — How to play</span>
+        <button class="about-close" aria-label="Close">×</button>
+      </header>
+      <div class="about-body">
+        <p class="about-goal">
+          <b>Goal:</b> drill blocks to reveal ore, draw a road network, and a fleet of
+          shovels &amp; haul trucks automatically digs, hauls and dumps ore at the
+          crushers to earn <b>credit</b>. Everything runs authoritatively on the server.
+        </p>
+
+        <h3>Loop</h3>
+        <p class="about-flow">drill ore → draw roads → shovels load trucks → trucks haul to a crusher → 💰 credit</p>
+
+        <h3>Camera</h3>
+        <ul>
+          <li><b>Scroll</b> to zoom · <b>hold right-click</b> to pan.</li>
+        </ul>
+
+        <h3>Mouse mode 🖱</h3>
+        <ul>
+          <li><b>Click a block</b> to open it; <b>Drill &amp; Explore</b> (or press <kbd>X</kbd>) reveals its composition (costs credit).</li>
+          <li><b>Click a vehicle</b> for details; assign a truck to a shovel, toggle its debug path.</li>
+          <li><b>Drive manually</b> with the <b>arrow keys</b> (light vehicles can move diagonally); haul trucks otherwise run on autopilot.</li>
+          <li><b>Click the parking pad</b> to show resize handles — drag a side to grow/shrink it.</li>
+        </ul>
+
+        <h3>Road ✏️ / Eraser 🧽 modes</h3>
+        <ul>
+          <li><b>Drag</b> to lay a one-way road (the flow follows your stroke); cross roads to make junctions.</li>
+          <li>Drawing toward a screen edge <b>auto-pans</b> the view so you can extend far.</li>
+          <li>Trucks navigate the network on the shortest legal route; the eraser removes road (parking stays).</li>
+        </ul>
+
+        <h3>Fleet 🛒</h3>
+        <ul>
+          <li><b>Buy assets</b> to expand the fleet (haul trucks, shovels, a scout) up to 25 vehicles.</li>
+        </ul>
+
+        <h3>Multiplayer</h3>
+        <ul>
+          <li><b>Create</b> a game or <b>join</b> with its 5-letter code — everyone shares the same world live.</li>
+        </ul>
+
+        <a class="about-gh" href="https://github.com/jarod68/mine-sim" target="_blank" rel="noopener">View the project on GitHub ↗</a>
+      </div>
+    </div>
+  </div>
 
   <div id="lobby" class="lobby">
     <div class="lobby-card">

@@ -367,6 +367,47 @@ main {
 }
 .shop-close:hover { color: #fff; background: none; }
 
+/* ── About / How-to-play modal (reuses .shop-modal backdrop) ── */
+.about-btn { background: #2563c9; }
+.about-btn:hover { background: #2f74e0; }
+.about-card {
+  width: min(560px, 94vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  background: #20242c;
+  border: 1px solid #353b45;
+  border-radius: 10px;
+  padding: 14px 18px 18px;
+  color: #e8eaed;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.about-head {
+  display: flex; align-items: center; gap: 10px;
+  font-weight: 700; font-size: 16px; color: #f2b81c;
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #2a2e36;
+  position: sticky; top: -14px; background: #20242c;
+}
+.about-close {
+  margin-left: auto; background: none; border: none; color: #9aa0aa;
+  font-size: 22px; line-height: 1; padding: 0 4px; cursor: pointer;
+}
+.about-close:hover { color: #fff; }
+.about-body { font-size: 13.5px; line-height: 1.5; }
+.about-body h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #5cd17a; margin: 14px 0 4px; }
+.about-body ul { margin: 0; padding-left: 18px; }
+.about-body li { margin: 2px 0; }
+.about-goal { background: #181b21; border: 1px solid #2a2e36; border-radius: 6px; padding: 8px 10px; margin: 0 0 6px; }
+.about-flow { color: #c7ccd4; font-style: italic; margin: 0; }
+.about-body kbd {
+  background: #11141a; border: 1px solid #353b45; border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 5px; font: 600 12px ui-monospace, monospace; color: #f2b81c;
+}
+.about-gh {
+  display: inline-block; margin-top: 16px; padding: 7px 14px;
+  background: #2563c9; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;
+}
+.about-gh:hover { background: #2f74e0; }
+
 .shop-row {
   display: flex;
   align-items: center;

@@ -507,6 +507,14 @@ document.getElementById('shop-btn').addEventListener('click', () => {
 // close when clicking the backdrop (outside the card)
 shopEl.addEventListener('click', (e) => { if (e.target === shopEl) closeShop(); });
 
+// ── About / How-to-play modal ──
+const aboutEl = document.getElementById('about');
+const closeAbout = () => { aboutEl.hidden = true; };
+document.getElementById('about-btn').addEventListener('click', () => { aboutEl.hidden = !aboutEl.hidden; });
+aboutEl.addEventListener('click', (e) => { if (e.target === aboutEl) closeAbout(); });
+aboutEl.querySelector('.about-close').addEventListener('click', closeAbout);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAbout(); });
+
 // ── Lobby / rooms (multiplayer) ──
 const lobbyEl = document.getElementById('lobby');
 const lobbyMsg = document.getElementById('lobby-msg');
