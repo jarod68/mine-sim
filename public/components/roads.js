@@ -372,8 +372,8 @@ export class Roads {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     applyCamera(ctx, this.dpr);
 
-    // asphalt (slight overlap hides sub-pixel seams between cells)
-    ctx.fillStyle = '#3a3e45';
+    // packed-earth "terre battue" surface (slight overlap hides sub-pixel seams)
+    ctx.fillStyle = '#a85d34';
     for (const c of this.cells.values()) {
       if (c.parking) continue;
       ctx.fillRect(c.gx * zoneW, c.gy * zoneH, zoneW + 0.6, zoneH + 0.6);
