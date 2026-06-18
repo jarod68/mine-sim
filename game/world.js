@@ -61,6 +61,10 @@ const EXCAVATORS = {
   R9800: { model: 'Liebherr R9800', bucket: 75, scale: 1.275 * 1.5 }, // 1.5× the R9600
 };
 
+// Minimum Chebyshev block distance between two shovels when spawning a new one
+// (3 ⇒ at least two empty blocks between them, so shovels never spawn stacked).
+const SHOVEL_MIN_BLOCK_DIST = 3;
+
 // Buyable assets (shop). Prices in $.
 const MAX_ASSETS = 25;
 const CATALOG = [
@@ -251,6 +255,7 @@ const PARK_RECHECK = 0.4;
 // to take a longer sideways detour, and finally (deadlock) to reverse one cell to
 // yield. Thresholds keep this from degenerating into back-and-forth jitter.
 const STUCK_DETOUR = 5;           // ticks a truck waits for a blocked shortest step before detouring
+const STUCK_DODGE = 24;           // …and after this, if a SHOVEL is the blocker, dodge it off-road
 const DIST_CACHE_MAX = 64;        // cap distinct cached distance fields
 
 const key = (gx, gy) => `${gx},${gy}`;
@@ -479,6 +484,7 @@ class Autopilot {
     st.want = null;   // recomputed by _advance; cleared so the resolver ignores idle trucks
     if (this._manual.has(truck)) { st.dir = null; st.yield = null; return; }
     if (st.yield) { st.dir = this._yieldStep(truck, st); return; }
+    if (st.dodge) { this._tickDodge(truck, st); return; }   // skirting a blocking shovel
     const sb = this._shovelBlock(shovel);
 
     // A road-travel phase assumes the truck is on the network. If it isn't (e.g.
@@ -543,7 +549,7 @@ class Autopilot {
       }
       st.dir = null; return;
     }
-    st.dir = a.dir;
+    this._advanceTail(truck, goals, gid, st, a);
   }
 
   // Road cells orthogonally touching the shovel's body — the preferred (on-road)
@@ -657,6 +663,117 @@ class Autopilot {
     return null;
   }
 
+  // ── shovel dodge ──
+  // A truck on the road can be boxed in by a shovel that has settled across (or
+  // beside) its only path. After it has waited long enough — and the obstacle is
+  // genuinely a shovel, not another truck — let it skirt the shovel off-road and
+  // rejoin the network past it to continue its mission.
+
+  // Apply the result of a road `_advance`: drive the chosen step, or — if blocked
+  // and a shovel is the culprit — kick off an off-road dodge around it.
+  _advanceTail(truck, goals, gid, st, a) {
+    if (a.dir === null && this._startDodgeIfShovel(truck, goals, gid, st)) {
+      this._tickDodge(truck, st);
+      return;
+    }
+    st.dir = a.dir;
+  }
+
+  // Every grid cell currently covered by a shovel's body.
+  _shovelCells() {
+    const s = new Set();
+    for (const sh of this.shovels)
+      for (const c of sh.footprintAt(sh.gx, sh.gy, this.grid)) s.add(key(c.gx, c.gy));
+    return s;
+  }
+
+  // Start a dodge when the truck has been stuck long enough AND the cell it wants
+  // is occupied by a shovel. Picks a nearby free road cell that makes progress
+  // toward the goal (past the shovel) to head for off-road.
+  _startDodgeIfShovel(truck, goals, gid, st) {
+    if (st.stuck < STUCK_DODGE || !st.want) return false;
+    if (!this._shovelCells().has(key(st.want.gx, st.want.gy))) return false;
+    const lc = this._logical(truck);
+    const target = this._dodgeTarget(truck, goals, gid, lc);
+    if (!target) return false;
+    st.dodge = { target, fromGx: lc.gx, fromGy: lc.gy, ticks: 0 };
+    st.stuck = 0;
+    return true;
+  }
+
+  // Nearest free, non-shovel road cell that is strictly closer to the goal than
+  // the truck's current cell — i.e. a foothold on the far side of the shovel.
+  _dodgeTarget(truck, goals, gid, lc) {
+    const field = this._distField(goals, gid);
+    const dC = field.get(key(lc.gx, lc.gy));
+    if (dC == null) return null;
+    const shovelCells = this._shovelCells();
+    let best = null, bestScore = Infinity;
+    const R = 6;
+    for (let dy = -R; dy <= R; dy++)
+      for (let dx = -R; dx <= R; dx++) {
+        const gx = lc.gx + dx, gy = lc.gy + dy;
+        if (gx < 0 || gy < 0 || gx >= this.grid.zoneCols || gy >= this.grid.zoneRows) continue;
+        if (!this.roads.isRoad(gx, gy) || shovelCells.has(key(gx, gy))) continue;
+        const d = field.get(key(gx, gy));
+        if (d == null || d >= dC) continue;            // must make progress toward the goal
+        if (!this._canOccupy(truck, gx, gy, 0, 0)) continue;
+        const score = Math.abs(dx) + Math.abs(dy) + d;  // near the truck AND near the goal
+        if (score < bestScore) { bestScore = score; best = { gx, gy }; }
+      }
+    return best;
+  }
+
+  // Drive an in-progress dodge: step off-road toward the foothold; the instant the
+  // truck is back on a (different) road cell, hand control to the normal autopilot.
+  _tickDodge(truck, st) {
+    truck.task = null;
+    truck.offroad = true;
+    const lc = this._logical(truck);
+    const backOnRoad = !truck.moving && this.roads.isRoad(lc.gx, lc.gy)
+      && !(lc.gx === st.dodge.fromGx && lc.gy === st.dodge.fromGy);
+    if (backOnRoad || (st.dodge.ticks = (st.dodge.ticks || 0) + 1) > 150) {
+      st.dodge = null; truck.offroad = false; st.dir = null; st.stuck = 0;
+      return;
+    }
+    st.dir = this._dodgeStep(truck, st.dodge.target);
+    if (!st.dir && !truck.moving) { st.dodge = null; truck.offroad = false; }  // boxed in — give up
+  }
+
+  // First step of a short off-road path (bounded BFS over free cells) from the
+  // truck to `target`. Unlike the greedy `_offroadStep`, this can detour sideways
+  // to get AROUND an obstacle such as a shovel body. Null if no path in the box.
+  _dodgeStep(truck, target) {
+    const a = this._logical(truck);
+    if (a.gx === target.gx && a.gy === target.gy) return null;
+    const pad = 4;
+    const minx = Math.max(0, Math.min(a.gx, target.gx) - pad);
+    const maxx = Math.min(this.grid.zoneCols - 1, Math.max(a.gx, target.gx) + pad);
+    const miny = Math.max(0, Math.min(a.gy, target.gy) - pad);
+    const maxy = Math.min(this.grid.zoneRows - 1, Math.max(a.gy, target.gy) + pad);
+    const came = new Map([[key(a.gx, a.gy), null]]);
+    const queue = [{ gx: a.gx, gy: a.gy }];
+    let found = null;
+    for (let h = 0; h < queue.length && !found; h++) {
+      const c = queue[h];
+      if (c.gx === target.gx && c.gy === target.gy) { found = c; break; }
+      for (const [dx, dy] of DIRS) {
+        const nx = c.gx + dx, ny = c.gy + dy;
+        if (nx < minx || nx > maxx || ny < miny || ny > maxy) continue;
+        const k = key(nx, ny);
+        if (came.has(k)) continue;
+        const isTarget = nx === target.gx && ny === target.gy;
+        if (!isTarget && !this._canOccupy(truck, nx, ny, dx, dy)) continue;
+        came.set(k, c);
+        queue.push({ gx: nx, gy: ny });
+      }
+    }
+    if (!found) return null;
+    let cur = found, prev = came.get(key(cur.gx, cur.gy));
+    while (prev && !(prev.gx === a.gx && prev.gy === a.gy)) { cur = prev; prev = came.get(key(cur.gx, cur.gy)); }
+    return [cur.gx - a.gx, cur.gy - a.gy];
+  }
+
   _tickToCrusher(truck, st) {
     truck.task = null;
     const bays = this._crusherBays();           // cell key → crusher index
@@ -678,7 +795,7 @@ class Autopilot {
       }
       st.dir = null; return;
     }
-    st.dir = a.dir;
+    this._advanceTail(truck, goals, 'C', st, a);
   }
 
   _tickToParking(truck, st) {
@@ -693,9 +810,10 @@ class Autopilot {
     const slot = this._parkSlot(truck);
     if (!slot) { st.dir = null; return; }
     const goals = new Set([key(slot.gx, slot.gy)]);
-    const a = this._advance(truck, goals, `P:${slot.gx},${slot.gy}`, null);
+    const gid = `P:${slot.gx},${slot.gy}`;
+    const a = this._advance(truck, goals, gid, null);
     if (a.arrived) { st.phase = 'parked'; st.timer = 0; st.dir = null; truck.heading = PARK_HEADING; return; }
-    st.dir = a.dir;
+    this._advanceTail(truck, goals, gid, st, a);
   }
 
   // If the truck can do something useful right now, switch its phase and return
@@ -1466,6 +1584,18 @@ class World {
         for (let gx = P.x; gx < P.x + P.w; gx++)
           if (!occ(gx, gy)) return { gx, gy };
     }
+    // A new shovel must keep ≥ SHOVEL_MIN_BLOCK_DIST blocks from every other
+    // shovel, so two are never generated on top of one another.
+    const clearOfShovels = (gx, gy) => {
+      if (type !== 'excavator') return true;
+      const bx = Math.floor(gx / 2), by = Math.floor(gy / 2);
+      for (const v of this.vehicles) {
+        if (v.type !== 'excavator') continue;
+        const sbx = Math.floor(v.gx / 2), sby = Math.floor(v.gy / 2);
+        if (Math.max(Math.abs(bx - sbx), Math.abs(by - sby)) < SHOVEL_MIN_BLOCK_DIST) return false;
+      }
+      return true;
+    };
     const cx = P.x + Math.floor(P.w / 2);
     const cy = P.y + P.h + 1;
     for (let r = 0; r < 100; r++) {
@@ -1475,7 +1605,7 @@ class World {
           const gx = cx + dx;
           const gy = cy + dy;
           if (gx < 0 || gy < 0 || gx >= this.grid.zoneCols || gy >= this.grid.zoneRows) continue;
-          if (!occ(gx, gy)) return { gx, gy };
+          if (!occ(gx, gy) && clearOfShovels(gx, gy)) return { gx, gy };
         }
     }
     return { gx: P.x, gy: P.y };

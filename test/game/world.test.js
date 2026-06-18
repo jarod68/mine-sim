@@ -457,6 +457,19 @@ describe('World — shop, assignment, manual control', () => {
     expect(w.buyAsset('NOPE').error).toBe('unknown');
   });
 
+  it('never spawns a new shovel within 2 blocks of another', () => {
+    w.credit = 1e9;
+    for (let i = 0; i < 8; i++) expect(w.buyAsset('R9400').ok).toBe(true);
+    const shovels = w.vehicles.filter((v) => v.type === 'excavator');
+    const blockDist = (a, b) => Math.max(
+      Math.abs(Math.floor(a.gx / 2) - Math.floor(b.gx / 2)),
+      Math.abs(Math.floor(a.gy / 2) - Math.floor(b.gy / 2)),
+    );
+    for (let i = 0; i < shovels.length; i++)
+      for (let j = i + 1; j < shovels.length; j++)
+        expect(blockDist(shovels[i], shovels[j])).toBeGreaterThanOrEqual(3);
+  });
+
   it('rejects a purchase it cannot afford', () => {
     w.credit = 10;
     expect(w.buyAsset('T264').error).toBe('credit');
@@ -685,6 +698,42 @@ describe('World — haul cycle integration', () => {
     const plan = w.debugPaths().OHT01;
     expect(plan).toBeTruthy();
     expect(Array.isArray(plan.path)).toBe(true);
+  });
+
+  it('dodges a shovel parked across its only road and still reaches the crusher', () => {
+    const w = new World();
+    const { autopilot: ap, grid: g } = w;
+    const row = 40;
+    const cells = [];
+    for (let gx = 6; gx <= 41; gx++) cells.push({ gx, gy: row, dir: null });
+    w.crushers = [{ x: 40, y: row + 1, w: 2, h: 2 }];     // bay = corridor cell (40,row)
+    w.roads.setCrushers(w.crushers); ap._bayCache = null; ap._distCache.clear();
+    w.setRoads(cells);
+
+    const oht = w.byLabel.get('OHT01');
+    oht.gx = 6; oht.gy = row; oht.tgx = 6; oht.tgy = row; oht.fromGx = 6; oht.fromGy = row;
+    oht.moving = false; oht.heading = 0; oht.load = 240; oht.loadOre = 'iron';
+    oht.x = 6.5 * g.zoneW; oht.y = (row + 0.5) * g.zoneH;
+    w.assign('OHT01', null);
+    ap.links.set(oht, w.byLabel.get('HEX01'));
+    ap.state.set(oht, { phase: 'to_crusher', dir: null, timer: 0, bucket: 0, stuck: 0, want: null, yield: null });
+
+    // A shovel settled right on the corridor, blocking the lane (manual = never relocates).
+    const hex = w.byLabel.get('HEX02');
+    hex.gx = 22; hex.gy = row; hex.tgx = 22; hex.tgy = row; hex.moving = false; hex.heading = 0; hex.place(g);
+    ap.setManual(hex);
+
+    let dodged = false, dumped = false, maxX = oht.gx;
+    for (let i = 0; i < 3000; i++) {
+      w.tick(1 / 30);
+      const st = ap.state.get(oht);
+      if (st && st.dodge) dodged = true;
+      if (st && st.phase === 'dumping') dumped = true;
+      maxX = Math.max(maxX, oht.gx);
+    }
+    expect(dodged).toBe(true);          // it had to skirt the shovel
+    expect(maxX).toBeGreaterThan(22);   // and got past it
+    expect(dumped).toBe(true);          // reaching the crusher
   });
 });
 
