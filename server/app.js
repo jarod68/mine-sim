@@ -53,7 +53,9 @@ function createServer(opts = {}) {
   function stop(cb) {
     loops.stop();
     for (const ws of wss.clients) ws.terminate();
-    wss.close(() => server.close(cb));
+    wss.close(() => {
+      if (server.listening) server.close(cb); else if (cb) cb();
+    });
   }
 
   return { app, server, wss, rooms, adminUser, adminPass, adminPassSource, envFile, config, stop };
