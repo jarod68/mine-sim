@@ -94,7 +94,8 @@ export class Vehicle {
     else if (this.type === 'oht') {
       const oreColor = this.loadOre ? COLORS_SOLID[this.loadOre] : null;
       drawOHT(ctx, this.len, this.wid, this.load, oreColor, modelTag);
-    } else drawPickup(ctx, this.len, this.wid);
+    } else if (this.type === 'dozer') drawDozer(ctx, this.len, this.wid, modelTag);
+    else drawPickup(ctx, this.len, this.wid);
     ctx.restore();
 
     // payload fill % on the dump bed (upright, tracks the heading)
@@ -402,6 +403,100 @@ function drawPickup(ctx, L, W) {
   ctx.fillStyle = on ? '#ff9b1a' : '#7a4a12';
   ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
   ctx.shadowBlur = 0;
+}
+
+// Track dozer (PR776) — white crawler bulldozer. Top view, front toward +x:
+//   • front 10% = a wide, very thin blade on its push-arms,
+//   • middle 25% = the cab (widest part) with a windshield,
+//   • rear 50% = the engine deck (narrower) with louvers + exhaust,
+//   • tail = a single ripper shank that hooks into the ground.
+function drawDozer(ctx, L, W, modelTag = null) {
+  // crawler tracks (dark) down both sides
+  ctx.fillStyle = '#15171b';
+  const tw = W * 0.28;
+  ctx.beginPath(); ctx.roundRect(-L * 0.46, -W / 2, L * 0.9, tw, 2); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-L * 0.46, W / 2 - tw, L * 0.9, tw, 2); ctx.fill();
+  ctx.strokeStyle = '#2e3238'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let gx = -L * 0.42; gx < L * 0.42; gx += 3.0) {
+    ctx.moveTo(gx, -W / 2); ctx.lineTo(gx, -W / 2 + tw);
+    ctx.moveTo(gx, W / 2 - tw); ctx.lineTo(gx, W / 2);
+  }
+  ctx.stroke();
+
+  // rear ripper — a shank hooking into the ground (top view)
+  ctx.strokeStyle = '#3b3e44';
+  ctx.lineWidth = Math.max(1.6, W * 0.11);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-L * 0.34, 0);
+  ctx.lineTo(-L * 0.45, 0);
+  ctx.quadraticCurveTo(-L * 0.53, 0, -L * 0.50, W * 0.18);
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+
+  // engine deck (rear 50%, narrower) — white with louvers + an exhaust stack
+  ctx.fillStyle = '#e8eaed';
+  ctx.beginPath(); ctx.roundRect(-L * 0.35, -W * 0.31, L * 0.50, W * 0.62, 2); ctx.fill();
+  ctx.strokeStyle = '#9aa0aa'; ctx.lineWidth = Math.max(0.6, W * 0.03);
+  ctx.beginPath();
+  for (let gx = -L * 0.30; gx <= -L * 0.04; gx += L * 0.05) { ctx.moveTo(gx, -W * 0.2); ctx.lineTo(gx, W * 0.2); }
+  ctx.stroke();
+  const er = Math.min(L, W) * 0.035;
+  ctx.fillStyle = '#2c2f34';
+  ctx.beginPath(); ctx.arc(-L * 0.27, -W * 0.23, er, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#6b7077'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(-L * 0.27, -W * 0.23, er, 0, Math.PI * 2); ctx.stroke();
+
+  // cab — a black square (thin white outline) midway between engine deck and blade
+  const cabH = W * 0.30;             // half-side (a square ≈ 0.6·W across)
+  const cabCx = L * 0.30;            // midway between the engine front and the blade
+  ctx.fillStyle = '#111317';
+  ctx.beginPath(); ctx.roundRect(cabCx - cabH, -cabH, cabH * 2, cabH * 2, 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = Math.max(0.4, W * 0.025);
+  ctx.stroke();
+
+  // flashing beacon (gyrophare) on the cab roof, like the LV (small)
+  const on = (performance.now() % 700) < 350;
+  const gbr = Math.min(L, W) * 0.042;
+  if (on) { ctx.shadowColor = 'rgba(255, 140, 0, 0.95)'; ctx.shadowBlur = 9; }
+  ctx.fillStyle = on ? '#ff9b1a' : '#7a4a12';
+  ctx.beginPath(); ctx.arc(cabCx, -cabH * 0.42, gbr, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // push-arms + the arm holding the blade (front 10%)
+  ctx.fillStyle = '#b9bec5';
+  for (const sy of [-W * 0.30, W * 0.30]) { ctx.beginPath(); ctx.roundRect(L * 0.38, sy - W * 0.045, L * 0.10, W * 0.09, 1); ctx.fill(); }
+  ctx.fillStyle = '#c7ccd2';
+  ctx.beginPath(); ctx.roundRect(L * 0.40, -W * 0.10, L * 0.08, W * 0.20, 1); ctx.fill();
+
+  // blade — wide, very thin steel edge at the very front
+  ctx.fillStyle = '#dadfe5';
+  ctx.beginPath(); ctx.roundRect(L * 0.46, -W * 0.58, L * 0.055, W * 1.16, 1.5); ctx.fill();
+  ctx.fillStyle = '#aeb4bc';
+  ctx.fillRect(L * 0.505, -W * 0.58, L * 0.012, W * 1.16);
+
+  // model tag on the engine deck, turned 90° and sitting on its own white pad so
+  // nothing (e.g. the louvers) shows through behind it.
+  if (modelTag) {
+    const fs = Math.max(2, W * 0.12);
+    ctx.save();
+    ctx.translate(-L * 0.18, 0);
+    ctx.rotate(-Math.PI / 2);
+    ctx.font = `bold ${fs.toFixed(1)}px system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const m = ctx.measureText(modelTag);
+    const tw = (m && m.width) || fs * 3;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(-tw / 2 - 1.5, -fs * 0.62, tw + 3, fs * 1.24, 1.5);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(40, 45, 55, 0.9)';
+    ctx.fillText(modelTag, 0, 0);
+    ctx.restore();
+  }
 }
 
 function drawExcavator(ctx, L, W, digging, modelTag) {

@@ -34,6 +34,20 @@ describe('Vehicle (client render object)', () => {
     expect(v.heading).toBe(1.5);
   });
 
+  it('draws every vehicle type (incl. the PR776 dozer) without throwing', () => {
+    const ctx = new Proxy({}, { get: (t, p) => (p in t ? t[p] : () => {}), set: (t, p, v) => { t[p] = v; return true; } });
+    const cases = [
+      sample({ type: 'oht', load: 120, loadOre: 'iron', task: { kind: 'dump', progress: 0.5 } }),
+      sample({ type: 'excavator', model: 'Liebherr R9400', digging: true }),
+      sample({ type: 'pickup', model: 'Light Utility Vehicle' }),
+      sample({ type: 'dozer', model: 'Liebherr PR776' }),
+    ];
+    for (const d of cases) {
+      const v = new Vehicle(d);
+      expect(() => { v.draw(ctx, true); v.draw(ctx, false); }).not.toThrow();
+    }
+  });
+
   it('applyDelta merges only the fields present', () => {
     const v = new Vehicle(sample({ load: 0 }));
     v.applyDelta({ label: 'OHT01', load: 120 });

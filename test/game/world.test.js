@@ -457,6 +457,19 @@ describe('World — shop, assignment, manual control', () => {
     expect(w.buyAsset('NOPE').error).toBe('unknown');
   });
 
+  it('buys a PR776 track dozer (off-road, ~R9400 proportions)', () => {
+    w.credit = 1000000;
+    const r = w.buyAsset('PR776');
+    expect(r.ok).toBe(true);
+    expect(w.credit).toBe(500000);
+    const dz = w.byLabel.get(r.label);
+    expect(dz.type).toBe('dozer');
+    expect(dz.label).toMatch(/^DZ\d\d$/);
+    expect(dz.model).toBe('Liebherr PR776');
+    expect(dz.roadOnly).toBe(false);
+    expect(dz.len / dz.wid).toBeCloseTo(1.1 / 0.87, 2);   // same proportion as R9400
+  });
+
   it('never spawns a new shovel within 2 blocks of another', () => {
     w.credit = 1e9;
     for (let i = 0; i < 8; i++) expect(w.buyAsset('R9400').ok).toBe(true);

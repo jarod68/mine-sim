@@ -52,6 +52,7 @@ const SPECS = {
   pickup:    { model: 'Light Utility Vehicle' },
   excavator: { model: 'Liebherr R9400', bucket: 40 },
   oht:       { model: 'Liebherr T264', payload: 240 },
+  dozer:     { model: 'Liebherr PR776' },
 };
 
 // Excavator reference models. `scale` multiplies the base visual size.
@@ -77,6 +78,7 @@ const CATALOG = [
   { id: 'R9400', type: 'excavator', model: 'Liebherr R9400',        price: 400000, spec: 'Shovel — 40 t bucket' },
   { id: 'R9600', type: 'excavator', model: 'Liebherr R9600',        price: 600000, spec: 'Shovel — 60 t bucket' },
   { id: 'R9800', type: 'excavator', model: 'Liebherr R9800',        price: 800000, spec: 'Shovel — 75 t bucket' },
+  { id: 'PR776', type: 'dozer',     model: 'Liebherr PR776',        price: 500000, spec: 'Track dozer — blade & ripper' },
 ];
 
 class Vehicle {
@@ -90,6 +92,7 @@ class Vehicle {
     this.fromGx = gx; this.fromGy = gy;
     this.len = len; this.wid = wid;
     this.speed = type === 'excavator' ? BASE_SPEED / 4
+      : type === 'dozer' ? BASE_SPEED / 3
       : type === 'oht' ? BASE_SPEED / 2 : BASE_SPEED;
     this.roadOnly = type === 'oht';
     const spec = SPECS[type] || {};
@@ -1706,6 +1709,9 @@ class World {
       this.autopilot.addShovel(v);
     } else if (item.type === 'oht') {
       v = new Vehicle({ type: 'oht', label: this._nextLabel('OHT'), gx: cell.gx, gy: cell.gy, len: zone * 1.445, wid: zone * 0.7 });
+    } else if (item.type === 'dozer') {
+      // Same proportions as the R9400 shovel, a touch smaller.
+      v = new Vehicle({ type: 'dozer', label: this._nextLabel('DZ'), gx: cell.gx, gy: cell.gy, len: zone * 1.1, wid: zone * 0.87, model: item.model });
     } else {
       v = new Vehicle({ type: 'pickup', label: this._nextLabel('LV'), gx: cell.gx, gy: cell.gy, len: zone * 0.95, wid: zone * 0.57 });
     }
