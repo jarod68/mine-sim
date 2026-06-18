@@ -4,14 +4,39 @@
 
 const { send, roomBroadcast } = require('./transport');
 const { validateLobby, validateCommand } = require('./validators');
+const { RateLimiter } = require('./rate-limit');
+const { clientIp } = require('./security');
 
-function setupWebsocket(wss, { rooms }) {
-  wss.on('connection', (ws) => {
+const MAX_CONN_PER_IP = 24;     // cap simultaneous sockets from one address
+const MAX_DROPPED = 400;        // terminate a socket that keeps flooding
+const MAX_JOIN_FAILS = 20;      // terminate a socket brute-forcing room codes
+
+function setupWebsocket(wss, { rooms, limiter = new RateLimiter() }) {
+  const perIp = new Map();      // ip → live socket count
+
+  wss.on('connection', (ws, req) => {
+    const ip = clientIp(req);
+    const n = (perIp.get(ip) || 0) + 1;
+    perIp.set(ip, n);
+    if (n > MAX_CONN_PER_IP) { perIp.set(ip, n - 1); return ws.close(1013, 'too many connections'); }
+
     ws.isAlive = true;
     ws.room = null;
+    ws._drops = 0;
+    ws._joinFails = 0;
     ws.on('pong', () => { ws.isAlive = true; });
-    ws.on('message', (raw) => handleMessage(ws, raw, rooms));
-    ws.on('close', () => rooms.removeClient(ws));
+    ws.on('message', (raw) => {
+      if (!limiter.allow(ws)) {                       // flood control
+        if (++ws._drops > MAX_DROPPED) ws.terminate();
+        return;
+      }
+      handleMessage(ws, raw, rooms);
+    });
+    ws.on('close', () => {
+      rooms.removeClient(ws);
+      const left = (perIp.get(ip) || 1) - 1;
+      if (left <= 0) perIp.delete(ip); else perIp.set(ip, left);
+    });
   });
 }
 
@@ -39,7 +64,11 @@ function handleMessage(ws, raw, rooms) {
       return sendJoined(ws, room);
     }
     const room = rooms.get(m.room);
-    if (!room) return send(ws, { t: 'joinError', reason: 'room not found' });
+    if (!room) {
+      send(ws, { t: 'joinError', reason: 'room not found' });
+      if (++ws._joinFails > MAX_JOIN_FAILS) ws.terminate();   // code-enumeration guard
+      return;
+    }
     rooms.addClient(ws, room);
     return sendJoined(ws, room);
   }

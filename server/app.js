@@ -11,6 +11,8 @@ const { RoomManager } = require('./rooms');
 const { adminRouter } = require('./admin-routes');
 const { setupWebsocket } = require('./ws-router');
 const { startLoops } = require('./loop');
+const { RateLimiter } = require('./rate-limit');
+const { parseOrigins, verifyOrigin } = require('./security');
 const { loadOrCreateAdminPass } = require('../admin');
 
 const ROOT = path.join(__dirname, '..');
@@ -21,6 +23,9 @@ function createServer(opts = {}) {
     graceMs: 2 * 60 * 60 * 1000,
     tickHz: 30,
     netEvery: 2,
+    maxPayload: 1024 * 1024,                 // 1 MB inbound frame cap (≫ a full roads edit)
+    allowedOrigins: parseOrigins(process.env.ALLOWED_ORIGINS),
+    rate: { ratePerSec: 30, burst: 60 },
     ...opts.config,
   };
 
@@ -37,8 +42,12 @@ function createServer(opts = {}) {
   app.use(express.static(path.join(ROOT, 'public')));
 
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server });
-  setupWebsocket(wss, { rooms });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: config.maxPayload,
+    verifyClient: (info) => verifyOrigin(info, config.allowedOrigins),
+  });
+  setupWebsocket(wss, { rooms, limiter: new RateLimiter(config.rate) });
   const loops = startLoops({ rooms, wss, tickHz: config.tickHz, netEvery: config.netEvery });
 
   function stop(cb) {

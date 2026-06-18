@@ -2,6 +2,7 @@
 // isolated authoritative World behind a short shareable code. Connection objects
 // (`ws`) are stored only as members of `room.clients`; sending is done elsewhere.
 
+const crypto = require('crypto');
 const { World } = require('../game/world');
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
@@ -30,7 +31,7 @@ class RoomManager {
     let c;
     do {
       c = '';
-      for (let i = 0; i < 5; i++) c += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+      for (let i = 0; i < 5; i++) c += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
     } while (this.rooms.has(c));
     return c;
   }
