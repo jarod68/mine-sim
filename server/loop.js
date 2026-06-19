@@ -5,7 +5,7 @@
 const { roomBroadcast } = require('./transport');
 const { sessionSummary } = require('../admin');
 
-function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000, reapMs = 60000, log = console }) {
+function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000, reapMs = 60000, persistMs = 15000, log = console }) {
   const dt = 1 / tickHz;
   let tickN = 0;
 
@@ -50,8 +50,13 @@ function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000
     for (const code of rooms.reapEmpty(sessionSummary)) log.log(`[reap] room=${code} (empty > grace)`);
   }, reapMs);
 
+  // Write-behind persistence: snapshot changed/live rooms to the store.
+  const persist = setInterval(() => {
+    try { rooms.saveDirty(); } catch (err) { log.error('[persist] error:', err); }
+  }, persistMs);
+
   return {
-    stop() { clearInterval(tick); clearInterval(heartbeat); clearInterval(reaper); },
+    stop() { clearInterval(tick); clearInterval(heartbeat); clearInterval(reaper); clearInterval(persist); },
   };
 }
 

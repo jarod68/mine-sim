@@ -13,6 +13,7 @@ const { setupWebsocket } = require('./ws-router');
 const { startLoops } = require('./loop');
 const { RateLimiter } = require('./rate-limit');
 const { parseOrigins, verifyOrigin } = require('./security');
+const { Store } = require('./store');
 const { loadOrCreateAdminPass } = require('../admin');
 
 const ROOT = path.join(__dirname, '..');
@@ -30,12 +31,20 @@ function createServer(opts = {}) {
   };
 
   const adminUser = 'admin';
-  const envFile = opts.envFile || path.join(opts.dataDir || process.env.DATA_DIR || ROOT, '.env');
+  const dataDir = opts.dataDir || process.env.DATA_DIR || ROOT;
+  const envFile = opts.envFile || path.join(dataDir, '.env');
   let adminPass = opts.adminPass;
   let adminPassSource = 'provided';
   if (!adminPass) ({ pass: adminPass, source: adminPassSource } = loadOrCreateAdminPass(envFile));
 
-  const rooms = new RoomManager({ maxRooms: config.maxRooms, graceMs: config.graceMs });
+  // SQLite persistence. `dbFile` may be ':memory:' (tests) or null to disable.
+  const dbFile = opts.dbFile !== undefined ? opts.dbFile : path.join(dataDir, 'minesim.db');
+  let store = null;
+  if (dbFile) {
+    try { store = new Store(dbFile); } catch (e) { console.error('[store] disabled (open failed):', e.message); }
+  }
+  const rooms = new RoomManager({ maxRooms: config.maxRooms, graceMs: config.graceMs, store });
+  rooms.loadFromStore();
 
   const app = express();
   app.use(adminRouter({ rooms, adminUser, adminPass, graceMs: config.graceMs }));
@@ -52,13 +61,15 @@ function createServer(opts = {}) {
 
   function stop(cb) {
     loops.stop();
+    try { rooms.saveAll(); } catch (e) { console.error('[store] final save failed:', e.message); }
+    if (store) store.close();
     for (const ws of wss.clients) ws.terminate();
     wss.close(() => {
       if (server.listening) server.close(cb); else if (cb) cb();
     });
   }
 
-  return { app, server, wss, rooms, adminUser, adminPass, adminPassSource, envFile, config, stop };
+  return { app, server, wss, rooms, store, adminUser, adminPass, adminPassSource, envFile, dbFile, config, stop };
 }
 
 module.exports = { createServer };

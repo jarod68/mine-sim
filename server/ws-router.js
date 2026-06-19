@@ -119,6 +119,7 @@ function handleMessage(ws, raw, rooms) {
       roomBroadcast(room, { t: 'state', state: world.fullState() });
       break;
   }
+  rooms.markDirty(room);   // any command mutated the world → persist on next save
 }
 
 function sendJoined(ws, room) {

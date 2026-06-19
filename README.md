@@ -385,14 +385,28 @@ docker run -p 3200:3200 -v minesim-data:/data -e DATA_DIR=/data mine-sim
 ```
 
 `npm run docker:build` cross-builds (`linux/amd64,linux/arm64`) and pushes the
-`jarod68/mine-sim:latest` image.
+`jarod68/mine-sim:latest` image. The image is `node:22-bookworm-slim` (Debian/glibc
+so `better-sqlite3` installs its prebuilt binary — no compiler, multi-arch clean).
+
+### Persistence
+
+Game rooms, the admin activity log and ended-session history are persisted to
+**SQLite** (`better-sqlite3`) at `DATA_DIR/minesim.db` — worlds are stored as
+gzip-compressed JSON snapshots ([`game/world.js`](game/world.js)
+`toSnapshot()/fromSnapshot()`, [`server/store.js`](server/store.js)). Rooms are
+written **behind** the simulation (every ~15 s for changed/live rooms, and on
+graceful `SIGTERM` shutdown) and **reloaded on boot**, so a restart/redeploy keeps
+every game where it was. **Mount a volume at `DATA_DIR`** for it to survive.
+
+> Single-process for now: one instance owns and ticks all rooms. Horizontal
+> scaling would need room sharding + sticky routing (see the architecture notes).
 
 **Environment variables**
 
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3200` | HTTP/WS port. |
-| `DATA_DIR` | `/data` (Docker) | Where the `.env` (admin password) is persisted — **mount a volume**. |
+| `DATA_DIR` | `/data` (Docker) | Holds the admin-password `.env` **and** `minesim.db` — **mount a volume**. |
 | `ADMIN_PASS` | — | Override the admin password (else generated/persisted). |
 | `ALLOWED_ORIGINS` | — | Comma-separated WS origin allow-list (else same-origin). |
 

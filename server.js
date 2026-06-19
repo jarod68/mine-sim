@@ -3,7 +3,7 @@ const { createServer } = require('./server/app');
 
 const PORT = process.env.PORT || 3200;
 const instance = createServer();
-const { server, adminUser, adminPass, adminPassSource, envFile } = instance;
+const { server, rooms, dbFile, adminUser, adminPass, adminPassSource, envFile } = instance;
 
 // A fatal error leaves the authoritative state possibly corrupt — log it and exit
 // so the process manager / container restarts on a clean slate (rather than
@@ -28,4 +28,5 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
 server.listen(PORT, () => {
   console.log(`mine-sim running on http://localhost:${PORT}`);
   console.log(`[admin] http://localhost:${PORT}/admin  user=${adminUser}  pass=${adminPass}  (${adminPassSource}: ${envFile})`);
+  console.log(`[store] ${dbFile || 'disabled'}  (restored ${rooms.size} room(s))`);
 });

@@ -13,6 +13,7 @@
     "docker:build": "npm run build"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "express": "^4.19.2",
     "ws": "^8.21.0"
   },

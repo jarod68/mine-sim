@@ -22,7 +22,7 @@ function collect(ws) {
 describe('WS — integration', () => {
   let inst, port;
   beforeEach(async () => {
-    inst = createServer({ adminPass: 'x' });
+    inst = createServer({ adminPass: 'x', dbFile: ':memory:' });
     await new Promise((r) => inst.server.listen(0, r));
     port = inst.server.address().port;
   });

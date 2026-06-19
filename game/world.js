@@ -1373,6 +1373,85 @@ class World {
     this._debug = new Set();   // labels with debug-path visualisation enabled
   }
 
+  // ── persistence ──
+  // A complete, JSON-serialisable snapshot of the authoritative state (incl. the
+  // hidden ore and the autopilot's durable links). Transient state — distance
+  // caches, planned paths, debug overlays, delta baselines — is NOT saved; it is
+  // re-derived on restore.
+  toSnapshot() {
+    const ap = this.autopilot;
+    return {
+      v: 1,
+      credit: this.credit,
+      boughtCrushers: this._boughtCrushers,
+      crushers: this.crushers,
+      parking: this.roads.parkings[0] || PARKING,
+      roads: this.roads.serialize(),
+      blocks: this.mine.blocks,
+      vehicles: this.vehicles.map((v) => ({
+        type: v.type, label: v.label, gx: v.gx, gy: v.gy, heading: v.heading,
+        len: v.len, wid: v.wid, model: v.model, bucket: v.bucket, payload: v.payload,
+        load: v.load, loadOre: v.loadOre, manual: v.manual,
+      })),
+      links: [...ap.links].map(([t, s]) => [t.label, s.label]),
+      manual: [...ap._manual].map((v) => v.label),
+      moveTo: [...this._moveTo].map(([v, st]) => [v.label, { gx: st.gx, gy: st.gy }]),
+    };
+  }
+
+  static fromSnapshot(snap) {
+    const w = new World();
+    w._applySnapshot(snap);
+    return w;
+  }
+
+  // Rebuild the world in place from a snapshot (vehicles snap to their saved cell;
+  // the autopilot re-plans from the restored links / move orders).
+  _applySnapshot(snap) {
+    this.credit = snap.credit ?? STARTING_CREDIT;
+    this._boughtCrushers = snap.boughtCrushers || 0;
+    this.dirty = new Map();
+    this.mine = { cols: COLS, rows: ROWS, blocks: snap.blocks };
+    this.crushers = snap.crushers || [];
+
+    this.roads = new Roads(this.grid);
+    const park = snap.parking || PARKING;
+    this.roads.addParking(park.x, park.y, park.w, park.h);
+    this.roads.setCrushers(this.crushers);
+    this.roads.setNetwork(snap.roads || []);
+
+    this.vehicles = (snap.vehicles || []).map((d) => {
+      const v = new Vehicle({ type: d.type, label: d.label, gx: d.gx, gy: d.gy, len: d.len, wid: d.wid, model: d.model, bucket: d.bucket, payload: d.payload });
+      v.heading = d.heading || 0;
+      v.load = d.load || 0;
+      v.loadOre = d.loadOre || null;
+      v.manual = !!d.manual;
+      v.place(this.grid);
+      return v;
+    });
+    this.byLabel = new Map(this.vehicles.map((v) => [v.label, v]));
+
+    this.autopilot = new Autopilot(this.grid, this.roads, {
+      getBlock: (bx, by) => this.mine.blocks[by]?.[bx],
+      mineBlock: (bx, by, amount) => this._mineBlock(bx, by, amount),
+      deliver: (ore, tons) => this._deliver(ore, tons),
+    });
+    for (const v of this.vehicles) if (v.type === 'excavator') this.autopilot.addShovel(v);
+    for (const [tl, sl] of snap.links || []) {
+      const t = this.byLabel.get(tl), s = this.byLabel.get(sl);
+      if (t && s) this.autopilot.assign(t, s);
+    }
+    for (const lbl of snap.manual || []) { const v = this.byLabel.get(lbl); if (v) { v.manual = true; this.autopilot.setManual(v); } }
+    this.autopilot.setEnabled(true);
+
+    this._moveTo = new Map();
+    for (const [lbl, t] of snap.moveTo || []) this.moveTo(lbl, t.gx, t.gy);
+
+    this._lastVeh = new Map();
+    this._lastCredit = null;
+    this._debug = new Set();
+  }
+
   // Smallest parking rectangle (anchored at PARKING) whose "en bataille" slot
   // grid holds `n` trucks plus ≥50% spare capacity. Grows columns first, then
   // rows, never below the default pad. `_buildSlots` lays slots at every column

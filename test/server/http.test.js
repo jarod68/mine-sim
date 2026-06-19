@@ -7,7 +7,7 @@ const AUTH = 'Basic ' + Buffer.from(`admin:${PASS}`).toString('base64');
 
 describe('HTTP — admin routes', () => {
   let inst;
-  beforeEach(() => { inst = createServer({ adminPass: PASS }); });
+  beforeEach(() => { inst = createServer({ adminPass: PASS, dbFile: ':memory:' }); });
   afterEach(() => new Promise((r) => inst.stop(r)));
 
   it('requires Basic auth for the admin page and API', async () => {

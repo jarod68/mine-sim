@@ -623,6 +623,21 @@ describe('World — collisions & live deltas', () => {
     expect(w._moveTo.has(lv)).toBe(false);
   });
 
+  it('round-trips the full world through toSnapshot / fromSnapshot', () => {
+    const w = new World();
+    w.drill(60, 50);
+    w.credit = 333000;
+    w.assign('OHT03', 'HEX01');               // change an autopilot link
+    const snap = JSON.parse(JSON.stringify(w.toSnapshot()));   // survives JSON
+    const w2 = World.fromSnapshot(snap);
+    expect(w2.credit).toBe(333000);
+    expect(w2.vehicles.length).toBe(w.vehicles.length);
+    expect(w2.mine.blocks[50][60].explored).toBe(true);
+    expect(w2.roads.serialize().length).toBe(w.roads.serialize().length);
+    expect(w2.autopilot.assignedShovel(w2.byLabel.get('OHT03'))?.label).toBe('HEX01');
+    expect(() => { for (let i = 0; i < 60; i++) w2.tick(1 / 30); }).not.toThrow();
+  });
+
   it('addCredit grants money and never goes below zero', () => {
     w.credit = 100000;
     expect(w.addCredit(100000)).toBe(200000);
