@@ -158,7 +158,7 @@
 
       $('events').innerHTML = d.events.length ? d.events.map((e) => `
         <tr>
-          <td>${tm(e.at)}</td>
+          <td>${dt(e.at)}</td>
           <td><span class="ev ${esc(e.type)}">${esc(e.type)}</span></td>
           <td class="code">${esc(e.code)}</td>
           <td class="muted">${'players' in e ? e.players + ' player(s)' : ''}</td>
