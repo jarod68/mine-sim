@@ -98,29 +98,31 @@ function primary() {
   });
   const leastLoaded = () => { let b = 0; for (let i = 1; i < WORKERS; i++) if (workers[i].conns < workers[b].conns) b = i; return b; };
 
-  // Primary-local admin HTTP server (proxied to from the gateway).
-  const adminSrv = http.createServer((req, res) => adminHandler(req, res, { ADMIN_PASS, workers, ask }));
-  adminSrv.listen(0, '127.0.0.1');
+  const pickWorker = (url) => {
+    const code = (url.match(/[?&]room=([^&\s#]+)/i) || [])[1];
+    let i = code ? workerForCode(decodeURIComponent(code), WORKERS) : -1;
+    if (i < 0 || !workers[i]?.port) i = leastLoaded();
+    return i;
+  };
 
-  const gateway = net.createServer((client) => {
-    client.once('data', (chunk) => {
-      client.pause();
-      const url = parseUrl(chunk);
-      let port;
-      if (url.startsWith('/admin')) {
-        port = adminSrv.address().port;
-      } else {
-        const code = (url.match(/[?&]room=([^&\s#]+)/i) || [])[1];
-        let i = code ? workerForCode(decodeURIComponent(code), WORKERS) : -1;
-        if (i < 0 || !workers[i]?.port) i = leastLoaded();
-        if (process.env.CLUSTER_DEBUG) console.log(`[gw] url=${url} code=${code || '-'} -> worker ${i} port ${workers[i].port}`);
-        port = workers[i].port;
-        workers[i].conns++;
-        client.on('close', () => { workers[i].conns--; });
-      }
-      proxy(client, port, chunk);
-    });
-    client.on('error', () => {});
+  // Gateway: an HTTP reverse-proxy that routes PER REQUEST. A raw TCP proxy would
+  // pin a whole connection to one backend based on its first request, but Traefik
+  // and browsers reuse keep-alive connections for many different paths — so a game
+  // request could land on the admin server (or vice-versa) and 404. Admin is
+  // served inline; other requests proxy to a worker. WebSocket upgrades are routed
+  // per connection by ?room (correct — each WS is a dedicated long-lived link).
+  const gateway = http.createServer((req, res) => {
+    if ((req.url || '/').startsWith('/admin')) return adminHandler(req, res, { ADMIN_PASS, workers, ask });
+    const i = pickWorker(req.url || '/');
+    if (process.env.CLUSTER_DEBUG) console.log(`[gw] ${req.method} ${req.url} -> worker ${i}`);
+    return proxyHttp(req, res, workers[i].port);
+  });
+  gateway.on('upgrade', (req, socket, head) => {
+    const i = pickWorker(req.url || '/');
+    if (process.env.CLUSTER_DEBUG) console.log(`[gw] WS ${req.url} -> worker ${i}`);
+    workers[i].conns++;
+    socket.on('close', () => { workers[i].conns--; });
+    proxyUpgrade(req, socket, head, workers[i].port);
   });
   waitReady(workers).then(() => gateway.listen(PORT, () => {
     console.log(`mine-sim cluster on http://localhost:${PORT}  (${WORKERS} workers)`);
@@ -176,22 +178,29 @@ function mergeAdmin(parts) {
 }
 
 // ── helpers ──
-function parseUrl(chunk) {
-  const m = chunk.toString('latin1', 0, Math.min(chunk.length, 2048)).match(/^[A-Z]+\s+(\S+)/);
-  return m ? m[1] : '/';
+// Proxy a single HTTP request to a worker (per-request → keep-alive safe).
+function proxyHttp(req, res, port) {
+  const up = http.request({ host: '127.0.0.1', port, method: req.method, path: req.url, headers: req.headers }, (pres) => {
+    res.writeHead(pres.statusCode || 502, pres.headers);
+    pres.pipe(res);
+  });
+  up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+  req.pipe(up);
 }
 
-// Transparent TCP proxy: write the already-read first chunk, then pipe both ways.
-function proxy(client, port, firstChunk) {
+// Proxy a WebSocket upgrade: open a raw socket to the worker, replay the upgrade
+// request line + headers, then pipe both ways for the life of the connection.
+function proxyUpgrade(req, socket, head, port) {
   const up = net.connect(port, '127.0.0.1', () => {
-    up.write(firstChunk);
-    client.pipe(up);
-    up.pipe(client);
-    client.resume();
+    let raw = `${req.method} ${req.url} HTTP/1.1\r\n`;
+    for (let i = 0; i < req.rawHeaders.length; i += 2) raw += `${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}\r\n`;
+    up.write(raw + '\r\n');
+    if (head && head.length) up.write(head);
+    socket.pipe(up); up.pipe(socket);
   });
-  const kill = () => { up.destroy(); client.destroy(); };
-  up.on('error', kill); client.on('error', kill);
-  up.on('close', () => client.destroy()); client.on('close', () => up.destroy());
+  const kill = () => { up.destroy(); socket.destroy(); };
+  up.on('error', kill); socket.on('error', kill);
+  up.on('close', () => socket.destroy()); socket.on('close', () => up.destroy());
 }
 
 function waitReady(workers) {
