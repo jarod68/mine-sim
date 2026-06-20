@@ -8,30 +8,30 @@ export default defineConfig({
     environment: 'node',
     include: ['test/unit/**/*.test.js'],
     coverage: {
-      // istanbul (not v8): instruments at transform time and merges coverage
-      // correctly for a CJS module loaded by several test files — v8 under-counts
-      // it (e.g. game/world.js loaded by both its own and the server tests).
-      provider: 'istanbul',
+      // v8 (not istanbul): istanbul instruments at transform time and MISSES the
+      // game/ modules loaded through world.js's CJS require() chain (they'd show
+      // 0%); v8 measures actual V8 execution, so it counts every module the tests
+      // exercise — incl. the autopilot/vehicle/roads split out of world.js.
+      provider: 'v8',
       reporter: ['text', 'html'],
       include: ['game/**/*.js', 'public/components/**/*.js'],
       // Pure rendering paths (canvas drawing) are exercised but not asserted on;
       // we still report them so coverage reflects the whole project. Thresholds
-      // are calibrated to the istanbul provider (counts statements/branches more
-      // granularly than v8) and kept just below the current numbers so they still
-      // catch a regression without being brittle.
+      // sit just below the current numbers so they catch a regression without
+      // being brittle (a couple of points absorb run-to-run variance from the
+      // random demo circuit / crusher placement).
       thresholds: {
         // Whole project — dominated by the intentionally-untested canvas renderers.
-        statements: 68,
-        branches: 64,
-        functions: 76,
-        lines: 69,
-        // The authoritative game logic is held to a high bar. (A couple of points
-        // of headroom absorb run-to-run variance from the random demo circuit.)
+        statements: 66,
+        branches: 54,
+        functions: 70,
+        lines: 68,
+        // The authoritative game logic is held to a high bar.
         'game/**': {
-          statements: 87,
-          branches: 77,
-          functions: 91,
-          lines: 91,
+          statements: 76,
+          branches: 57,
+          functions: 82,
+          lines: 80,
         },
       },
     },
