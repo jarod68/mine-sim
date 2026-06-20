@@ -191,8 +191,13 @@ server/
 admin.js                  Admin helpers (auth, password persistence, snapshots).
 admin.html                Admin dashboard (standalone, served behind auth).
 game/
-  world.js                Authoritative World + Vehicle + Roads + Autopilot.
-  mine.js                 Mine generation + block/ore model.
+  world.js                Authoritative World orchestrator (tick, commands, snapshots).
+  vehicle.js              Vehicle physics (cell movement, collision footprint).
+  roads.js                Authoritative road network model.
+  autopilot.js            Haul autopilot: task FSM, pathfinding, anti-jam.
+  min-heap.js             Binary heap for the move-to A* planner.
+  constants.js            Shared gameplay constants + tiny helpers.
+  mine.js                 Mine generation + block/ore model + rich veins.
 public/
   index.html              UI shell, lobby, canvas layers, modals.
   app.js                  Client bootstrap, input, modals, parking resize.
@@ -207,7 +212,10 @@ public/
     mine.js               Shared colour/label constants.
 scripts/
   capture-screenshots.js  Playwright script that regenerates docs/screenshots.
-test/                     Vitest suites (game / server / client).
+test-unit/                Vitest suites (game / server / client).
+test-visual/              Playwright visual-regression tests (canvas renderers).
+test-load/                Standalone WebSocket load generator.
+eslint.config.js          ESLint (flat config); `npm run lint`.
 ```
 
 ---
@@ -281,18 +289,22 @@ the road array bounds-capped.
 | `t` | Payload | When |
 | --- | --- | --- |
 | `joined` | `room` | After create/join. |
-| `state` | `state` (full snapshot) | On join, and after `reset` / `resizeParking`. |
+| `state` | `state` (full snapshot) | On join, and after `reset`. |
 | `joinError` | `reason` | `room not found` / `server full`. |
 | `drilled` | `x, y, block, credit, error` | Reply to `drill`. |
 | `roads` | `cells` | Broadcast to *other* clients after a road edit. |
+| `parking` | `rect, cells` | Broadcast after a `resizeParking` (light — not a full state). |
 | `bought` | `id, ok, error, credit, label` | Reply to `buy`. |
 | `vehicle` | `vehicle` | Broadcast after a successful `buy`. |
 | `crusher` | `crusher, extraCrushers` | Broadcast after a crusher is placed. |
-| `live` | `vehicles[], blocks[], credit?, debug?` | Per-tick delta (15 Hz); only changed fields. |
+| `live` | `vehicles[], blocks[], credit?, debug?` | Per-tick delta (15 Hz); only changed **non-positional** fields. |
+| *(binary)* | `pos` frame | Per-tick vehicle positions, compact binary: `[u8 type=1][u16 count]{ u16 id, f32 x, f32 y, f32 heading, u16 gx, u16 gy }`. |
 
 The full **`state`** snapshot carries: `cols`, `rows`, `view {w,h}`,
 `blockTonnage`, `credit`, `drillCost`, `parking`, `crushers`, `catalog`,
-`maxAssets`, `roads`, `vehicles[]`, `blocks[][]`.
+`maxAssets`, `roads`, `vehicles[]` (each with a stable `id`), and `blocks[]` —
+only the **significant** blocks (explored or a vein); the client defaults the rest
+to unexplored. WebSocket frames use `permessage-deflate` for the big snapshots.
 
 ### Admin HTTP API
 
@@ -346,27 +358,37 @@ at `DATA_DIR`** for the password to survive container redeploys.
 
 ## Tests
 
+Three kinds, one per directory (each has its own README):
+
 ```bash
-npm test                  # vitest run
-npm run coverage          # + coverage gate (istanbul)
+npm run lint              # ESLint (flat config)
+npm test                  # unit (Vitest)          → test-unit/
+npm run coverage          # unit + coverage gate (istanbul)
+npm run test:visual       # visual regression (Playwright) → test-visual/
+npm run test:load -- ...  # WebSocket load generator → test-load/
 ```
 
-Suites are split by layer ([`test/`](test)):
+**Unit** ([`test-unit/`](test-unit)) — Vitest, split by layer:
 
 | Path | What it covers |
 | --- | --- |
-| `test/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock, docking, dodge), parking layout & resize, shovel spacing & relocation, a full **haul-cycle integration** run. |
-| `test/game/mine.test.js` | Mine generation, ore deposits. |
-| `test/game/admin.test.js` | Auth, session snapshots, **password persistence** across restarts. |
-| `test/server/validators.test.js` | Message validation/sanitization & bounds caps. |
-| `test/server/security.test.js` | Origin allow-listing, IP parsing, rate-limit token bucket. |
-| `test/server/http.test.js` | Admin routes via **supertest** (401/200, sessions, credit grant, static client). |
-| `test/server/ws.test.js` | **ws integration**: create/state, joinError, drill, hostile-roads sanitization, cross-site Origin rejection. |
-| `test/client/*.test.js` | Client renderers/helpers in happy-dom (camera, mine, roads, net, vehicle). |
+| `test-unit/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock, docking, dodge), parking layout & resize, shovel spacing & relocation, rich-vein dozer prep, a full **haul-cycle integration** run. |
+| `test-unit/game/mine.test.js` | Mine generation, ore deposits, rich veins (deterministic via seed). |
+| `test-unit/game/admin.test.js` | Auth, session snapshots, **password persistence** across restarts. |
+| `test-unit/server/*.test.js` | Validators, security/rate-limit, admin HTTP (**supertest**), **ws integration**, SQLite persistence. |
+| `test-unit/client/*.test.js` | Client renderers/helpers in happy-dom (camera, mine, roads, net, vehicle). |
 
 Coverage uses the **istanbul** provider (it merges a CJS module loaded by several
 test files correctly, which v8 under-counts). The authoritative `game/` logic is
-held to a high bar; the canvas renderers are intentionally untested.
+held to a high bar; the canvas renderers are covered by the visual tests instead.
+
+**Visual** ([`test-visual/`](test-visual)) — Playwright screenshot-regression of
+the canvas renderers (dozer, vein mesh, road markings) against committed
+baselines. `npm run test:visual:update` regenerates them after an intended change.
+
+**Load** ([`test-load/`](test-load)) — a standalone WebSocket client that ramps
+parallel rooms/players to find the server's capacity (set `TEST_MODE=1` to lift
+the per-IP caps).
 
 Regenerate the README screenshots from the live app:
 
