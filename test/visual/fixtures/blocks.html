@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;background:#0c0f0d}canvas{display:block}
+</style></head><body>
+<canvas id="c"></canvas>
+<script type="module">
+  import { GameCanvas } from '/public/components/game-canvas.js';
+  import { camera } from '/public/components/camera.js';
+
+  const cols = 3, rows = 3, view = { w: 600, h: 600 };
+  const ore = (x, y, type) => ({ x, y, explored: true, ore: type, orePct: 50, dirtPct: 50, oreRemaining: 5000, dirtRemaining: 5000 });
+  const vein = (x, y, passes) => ({ x, y, explored: false, prep: true, prepPasses: passes, prepMax: 10 });
+
+  // Every block state the renderer can draw, one per cell:
+  const cells = [
+    { x: 0, y: 0, explored: false },                                                        // unexplored
+    { x: 1, y: 0, explored: true, ore: null, orePct: 0, dirtPct: 100, oreRemaining: 0, dirtRemaining: 10000 }, // mined-out dirt
+    ore(2, 0, 'iron'),
+    ore(0, 1, 'copper'), ore(1, 1, 'gold'), ore(2, 1, 'carbon'),
+    vein(0, 2, 0), vein(1, 2, 5), vein(2, 2, 9),                                             // vein at 0 / 5 / 9 passes
+  ];
+  const blocks = [];
+  for (let y = 0; y < rows; y++) { const row = []; for (let x = 0; x < cols; x++) row.push({ x, y, explored: false }); blocks.push(row); }
+  for (const c of cells) blocks[c.y][c.x] = c;
+
+  camera.scale = 1; camera.ox = 0; camera.oy = 0;
+  const gc = new GameCanvas(document.getElementById('c'), { cols, rows, view, blocks }, () => {});
+  gc.resize(600, 600);
+  window.__ready = true;
+</script>
+</body></html>

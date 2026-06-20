@@ -12,8 +12,12 @@ npm run test:visual:update    # regenerate baselines after an intended change
 First run needs the browser once: `npx playwright install chromium`.
 
 ## Fixtures
-- `dozer` / `assets` — vehicle sprites (the dozer; one of every catalog asset type).
-- `vein-mesh` — the rich-vein elevation mesh + a revealed ore block.
+- `assets` — one sprite of every catalog vehicle type (pickup, R9400/R9600/R9800
+  shovels, T264 truck, PR776 dozer).
+- `blocks` — every block render state: unexplored, mined-out dirt, the four ores
+  (iron / copper / gold / carbon) with their hatch, and a vein at 0 / 5 / 9 prep
+  passes (mesh fading as it's prepared).
+- `vein-mesh` — the rich-vein elevation mesh up close + a revealed ore block.
 - `roads` — one-way lane markings, divided lanes, a junction.
 - `parking-crusher` — a parking pad + crusher building linked by road.
 - `seed-map` — the default map's **vein layout** for a fixed seed. The spec
