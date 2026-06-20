@@ -265,7 +265,7 @@ const PARK_RECHECK = 0.4;
 // to take a longer sideways detour, and finally (deadlock) to reverse one cell to
 // yield. Thresholds keep this from degenerating into back-and-forth jitter.
 const STUCK_DETOUR = 5;           // ticks a truck waits for a blocked shortest step before detouring
-const STUCK_DODGE = 24;           // …and after this, if a SHOVEL is the blocker, dodge it off-road
+const STUCK_DODGE = 24;           // …and after this, if still boxed in by a vehicle, dodge off-road
 const DIST_CACHE_MAX = 64;        // cap distinct cached distance fields
 
 const key = (gx, gy) => `${gx},${gy}`;
@@ -702,16 +702,15 @@ class Autopilot {
     return null;
   }
 
-  // ── shovel dodge ──
+  // ── off-road dodge ──
   // A truck on the road can be boxed in by a shovel that has settled across (or
   // beside) its only path. After it has waited long enough — and the obstacle is
   // genuinely a shovel, not another truck — let it skirt the shovel off-road and
-  // rejoin the network past it to continue its mission.
-
-  // Apply the result of a road `_advance`: drive the chosen step, or — if blocked
-  // and a shovel is the culprit — kick off an off-road dodge around it.
+  // rejoin the network past it to continue its mission. (Head-on truck stand-offs
+  // are handled instead by `_resolveDeadlocks` / `_yieldStep`, which now pulls the
+  // yielder OFF the road rather than reversing it the wrong way.)
   _advanceTail(truck, goals, gid, st, a) {
-    if (a.dir === null && this._startDodgeIfShovel(truck, goals, gid, st)) {
+    if (a.dir === null && this._startDodgeIfStuck(truck, goals, gid, st)) {
       this._tickDodge(truck, st);
       return;
     }
@@ -726,12 +725,26 @@ class Autopilot {
     return s;
   }
 
+  // A stationary truck (other than `self`) covering cell (gx,gy) — a real jam, not
+  // a truck merely passing through.
+  _stationaryTruckAt(gx, gy, self) {
+    for (const [t] of this.state) {
+      if (t === self || t.moving) continue;
+      for (const c of t.collisionCells(t.gx, t.gy, this.grid)) if (c.gx === gx && c.gy === gy) return true;
+    }
+    return false;
+  }
+
   // Start a dodge when the truck has been stuck long enough AND the cell it wants
-  // is occupied by a shovel. Picks a nearby free road cell that makes progress
-  // toward the goal (past the shovel) to head for off-road.
-  _startDodgeIfShovel(truck, goals, gid, st) {
+  // is held by a real obstacle — a shovel, or another truck that's sitting still
+  // (a jam / stand-off). Picks a nearby free road cell that makes progress toward
+  // the goal (past the obstacle) to head for off-road, so the truck stops
+  // congesting the lane instead of waiting indefinitely.
+  _startDodgeIfStuck(truck, goals, gid, st) {
     if (st.stuck < STUCK_DODGE || !st.want) return false;
-    if (!this._shovelCells().has(key(st.want.gx, st.want.gy))) return false;
+    const wk = key(st.want.gx, st.want.gy);
+    const blocked = this._shovelCells().has(wk) || this._stationaryTruckAt(st.want.gx, st.want.gy, truck);
+    if (!blocked) return false;
     const lc = this._logical(truck);
     const target = this._dodgeTarget(truck, goals, gid, lc);
     if (!target) return false;
@@ -1044,19 +1057,35 @@ class Autopilot {
     const bl = this._logical(y.to);
     const proj = (bl.gx - a.gx) * y.axis[0] + (bl.gy - a.gy) * y.axis[1];
     const adjacent = Math.abs(bl.gx - a.gx) + Math.abs(bl.gy - a.gy) <= 1;
-    if (proj < 0 || (!adjacent && proj === 0)) { st.yield = null; st.stuck = 0; return null; } // passed → resume
+    if (proj < 0 || (!adjacent && proj === 0)) { st.yield = null; st.stuck = 0; truck.offroad = false; return null; } // passed → resume
     if (truck.moving) return st.dir;          // finish the current hop
     if (y.parked) return null;                // tucked aside → hold until it passes
     let pocket = null, back = null;
     for (const n of this._neighbors(a)) {
       if (this.isFree && !this.isFree(n.gx, n.gy, truck)) continue;
       const along = (n.gx - a.gx) * y.axis[0] + (n.gy - a.gy) * y.axis[1];
-      if (along === 0) pocket = n;            // off-axis escape
+      if (along === 0) pocket = n;            // off-axis escape (a side road)
       else if (along < 0) back = n;           // one cell back, away from the oncoming truck
     }
     if (pocket) { y.parked = true; return [pocket.gx - a.gx, pocket.gy - a.gy]; }
+    // No side road: pull OFF the road to the side to clear the lane, rather than
+    // reversing the wrong way down it.
+    const side = this._sideStepOff(truck, a, y.axis);
+    if (side) { y.parked = true; truck.offroad = true; return side; }
     if (back) return [back.gx - a.gx, back.gy - a.gy];
     return null;                              // boxed in — wait
+  }
+
+  // A free cell perpendicular to the conflict axis (road or not) the truck can pull
+  // into to clear a one-lane stand-off — used instead of reversing against the flow.
+  _sideStepOff(truck, a, axis) {
+    const perp = axis[0] === 0 ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
+    for (const [dx, dy] of perp) {
+      const gx = a.gx + dx, gy = a.gy + dy;
+      if (gx < 0 || gy < 0 || gx >= this.grid.zoneCols || gy >= this.grid.zoneRows) continue;
+      if (this._canOccupy(truck, gx, gy, dx, dy)) return [dx, dy];
+    }
+    return null;
   }
 
   // Cells from which a truck can be loaded: any road cell on the shovel's block
