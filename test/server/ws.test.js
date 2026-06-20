@@ -87,4 +87,22 @@ describe('WS — integration', () => {
     });
     expect(rejected).toBe(true);
   });
+
+  it('TEST_MODE lifts the per-IP connection cap (24)', async () => {
+    const N = 28;   // > MAX_CONN_PER_IP
+    const openCount = async (testMode) => {
+      const i2 = createServer({ adminPass: 'x', dbFile: ':memory:', testMode });
+      await new Promise((r) => i2.server.listen(0, r));
+      const p = i2.server.address().port;
+      const conns = Array.from({ length: N }, () => new WebSocket(`ws://localhost:${p}`));
+      conns.forEach((w) => w.on('error', () => {}));
+      await new Promise((r) => setTimeout(r, 1500));
+      const open = conns.filter((w) => w.readyState === WebSocket.OPEN).length;
+      conns.forEach((w) => { try { w.terminate(); } catch { /* ignore */ } });
+      await new Promise((r) => i2.stop(r));
+      return open;
+    };
+    expect(await openCount(false)).toBeLessThanOrEqual(24);   // capped
+    expect(await openCount(true)).toBe(N);                    // uncapped
+  });
 });

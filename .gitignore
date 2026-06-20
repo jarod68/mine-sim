@@ -7,7 +7,7 @@ node_modules/
 # Runtime-generated admin password (persisted on the server's volume)
 .env
 
-# SQLite persistence (lives on the server's data volume)
-minesim.db
-minesim.db-wal
-minesim.db-shm
+# SQLite persistence (lives on the server's data volume; one DB per cluster worker)
+minesim*.db
+minesim*.db-wal
+minesim*.db-shm

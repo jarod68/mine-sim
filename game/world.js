@@ -1371,6 +1371,8 @@ class World {
     this._lastVeh = new Map();
     this._lastCredit = null;
     this._debug = new Set();   // labels with debug-path visualisation enabled
+    this._gridDirty = true; this._gridJson = null;   // cached mine-grid JSON (persistence)
+    this._occ = null;          // collision occupancy index (built each tick)
   }
 
   // ── persistence ──
@@ -1397,6 +1399,20 @@ class World {
       manual: [...ap._manual].map((v) => v.label),
       moveTo: [...this._moveTo].map(([v, st]) => [v.label, { gx: st.gx, gy: st.gy }]),
     };
+  }
+
+  // Same snapshot, pre-serialised to a JSON string for persistence. The 26k-block
+  // mine grid dominates the size but changes only on drill/mine, so its JSON is
+  // cached and reused — turning a per-save multi-MB stringify into a tiny one.
+  snapshotJson() {
+    if (this._gridDirty || this._gridJson == null) {
+      this._gridJson = JSON.stringify(this.mine.blocks);
+      this._gridDirty = false;
+    }
+    const snap = this.toSnapshot();
+    delete snap.blocks;                       // injected from the cached string below
+    const head = JSON.stringify(snap);
+    return `${head.slice(0, -1)},"blocks":${this._gridJson}}`;
   }
 
   static fromSnapshot(snap) {
@@ -1450,6 +1466,8 @@ class World {
     this._lastVeh = new Map();
     this._lastCredit = null;
     this._debug = new Set();
+    this._gridDirty = true; this._gridJson = null;
+    this._occ = null;
   }
 
   // Smallest parking rectangle (anchored at PARKING) whose "en bataille" slot
@@ -1535,7 +1553,15 @@ class World {
   // ── simulation tick ──
   tick(dt) {
     const isRoad = (gx, gy) => this.roads.isRoad(gx, gy);
-    const isFree = (gx, gy, self) => this._isFree(gx, gy, self);
+    // Occupancy index: one Set of vehicles per cell, so collision queries are
+    // O(1) instead of O(n) (the old scan made the whole tick O(n²)). Built from
+    // current positions before anyone moves, then kept correct by re-indexing
+    // each vehicle right after it moves — matching the old live-scan semantics.
+    this._buildOcc();
+    const isFree = (gx, gy, self) => {
+      const s = this._occ.get(key(gx, gy));
+      return !s || s.size === 0 || (s.size === 1 && s.has(self));
+    };
     this.autopilot.isFree = isFree;
     this.autopilot.update(dt);
     for (const v of this.vehicles) {
@@ -1544,10 +1570,49 @@ class World {
       if (mv !== undefined) dir = mv;
       else if (v.manual && v.manualDir) dir = v.manualDir;
       else if (this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
+      const oldKeys = this._occKeys(v);
       v.update(dt, dir, this.grid, isRoad, isFree);
+      this._reindexOcc(v, oldKeys);
     }
   }
 
+  // True when anything is (or is about to start) moving — drives the loop's
+  // adaptive tick rate (idle rooms tick far less often).
+  anyMoving() {
+    if (this._moveTo.size > 0) return true;
+    for (const v of this.vehicles) if (v.moving) return true;
+    return false;
+  }
+
+  _buildOcc() {
+    const occ = new Map();
+    for (const v of this.vehicles) {
+      for (const c of v.occupiedCells(this.grid)) {
+        const k = key(c.gx, c.gy);
+        let s = occ.get(k); if (!s) occ.set(k, s = new Set());
+        s.add(v);
+      }
+    }
+    this._occ = occ;
+  }
+
+  _occKeys(v) {
+    const out = [];
+    for (const c of v.occupiedCells(this.grid)) out.push(key(c.gx, c.gy));
+    return out;
+  }
+
+  _reindexOcc(v, oldKeys) {
+    for (const k of oldKeys) { const s = this._occ.get(k); if (s) { s.delete(v); if (!s.size) this._occ.delete(k); } }
+    for (const c of v.occupiedCells(this.grid)) {
+      const k = key(c.gx, c.gy);
+      let s = this._occ.get(k); if (!s) this._occ.set(k, s = new Set());
+      s.add(v);
+    }
+  }
+
+  // O(n) freeness scan — kept for direct/external use (tests, off-tick checks).
+  // The hot tick path uses the O(1) index above.
   _isFree(gx, gy, self) {
     for (const v of this.vehicles) {
       if (v === self) continue;
@@ -1557,7 +1622,7 @@ class World {
   }
 
   // ── gameplay hooks ──
-  _markDirty(b) { this.dirty.set(`${b.x},${b.y}`, b); }
+  _markDirty(b) { this.dirty.set(`${b.x},${b.y}`, b); this._gridDirty = true; }
 
   _mineBlock(bx, by, amount) {
     const block = this.mine.blocks[by]?.[bx];

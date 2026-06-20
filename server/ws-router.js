@@ -11,14 +11,17 @@ const MAX_CONN_PER_IP = 24;     // cap simultaneous sockets from one address
 const MAX_DROPPED = 400;        // terminate a socket that keeps flooding
 const MAX_JOIN_FAILS = 20;      // terminate a socket brute-forcing room codes
 
-function setupWebsocket(wss, { rooms, limiter = new RateLimiter() }) {
+// `testMode` lifts every per-IP / per-connection anti-abuse limit (connection
+// cap, rate limiter, join-fail terminate) so a load test can hammer the server
+// from a single IP. Off by default; enable only for benchmarking.
+function setupWebsocket(wss, { rooms, limiter = new RateLimiter(), testMode = false }) {
   const perIp = new Map();      // ip → live socket count
 
   wss.on('connection', (ws, req) => {
     const ip = clientIp(req);
     const n = (perIp.get(ip) || 0) + 1;
     perIp.set(ip, n);
-    if (n > MAX_CONN_PER_IP) { perIp.set(ip, n - 1); return ws.close(1013, 'too many connections'); }
+    if (!testMode && n > MAX_CONN_PER_IP) { perIp.set(ip, n - 1); return ws.close(1013, 'too many connections'); }
 
     ws.isAlive = true;
     ws.room = null;
@@ -26,11 +29,11 @@ function setupWebsocket(wss, { rooms, limiter = new RateLimiter() }) {
     ws._joinFails = 0;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (raw) => {
-      if (!limiter.allow(ws)) {                       // flood control
+      if (!testMode && !limiter.allow(ws)) {           // flood control
         if (++ws._drops > MAX_DROPPED) ws.terminate();
         return;
       }
-      handleMessage(ws, raw, rooms);
+      handleMessage(ws, raw, rooms, testMode);
     });
     ws.on('close', () => {
       rooms.removeClient(ws);
@@ -48,7 +51,7 @@ function worldBounds(world) {
   };
 }
 
-function handleMessage(ws, raw, rooms) {
+function handleMessage(ws, raw, rooms, testMode = false) {
   let parsed;
   try { parsed = JSON.parse(raw); } catch { return; }
   if (!parsed || typeof parsed.t !== 'string') return;
@@ -66,7 +69,7 @@ function handleMessage(ws, raw, rooms) {
     const room = rooms.get(m.room);
     if (!room) {
       send(ws, { t: 'joinError', reason: 'room not found' });
-      if (++ws._joinFails > MAX_JOIN_FAILS) ws.terminate();   // code-enumeration guard
+      if (!testMode && ++ws._joinFails > MAX_JOIN_FAILS) ws.terminate();   // code-enumeration guard
       return;
     }
     rooms.addClient(ws, room);

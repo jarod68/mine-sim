@@ -6,6 +6,6 @@ Dockerfile
 .dockerignore
 *.md
 .env
-minesim.db*
+minesim*.db*
 coverage
 docs

@@ -638,6 +638,29 @@ describe('World — collisions & live deltas', () => {
     expect(() => { for (let i = 0; i < 60; i++) w2.tick(1 / 30); }).not.toThrow();
   });
 
+  it('snapshotJson is a valid snapshot equal to toSnapshot (grid JSON cached)', () => {
+    const w = new World();
+    w.drill(40, 30);
+    const fromJson = JSON.parse(w.snapshotJson());
+    expect(fromJson.blocks.length).toBe(w.mine.blocks.length);
+    expect(fromJson.credit).toBe(w.toSnapshot().credit);
+    const w2 = World.fromSnapshot(fromJson);
+    expect(w2.mine.blocks[30][40].explored).toBe(true);
+    const cached = w._gridJson;
+    w.snapshotJson();
+    expect(w._gridJson).toBe(cached);              // reused (grid unchanged)
+    w.drill(41, 30);
+    w.snapshotJson();
+    expect(w._gridJson).not.toBe(cached);          // regenerated after a drill
+  });
+
+  it('anyMoving reflects whether the room is idle (for adaptive ticking)', () => {
+    const w = new World();
+    expect(w.anyMoving()).toBe(false);             // fresh world: parked, nothing moving
+    w.moveTo('LV01', 80, 60);
+    expect(w.anyMoving()).toBe(true);              // a move order makes it active
+  });
+
   it('addCredit grants money and never goes below zero', () => {
     w.credit = 100000;
     expect(w.addCredit(100000)).toBe(200000);

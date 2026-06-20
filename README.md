@@ -398,8 +398,24 @@ written **behind** the simulation (every ~15 s for changed/live rooms, and on
 graceful `SIGTERM` shutdown) and **reloaded on boot**, so a restart/redeploy keeps
 every game where it was. **Mount a volume at `DATA_DIR`** for it to survive.
 
-> Single-process for now: one instance owns and ticks all rooms. Horizontal
-> scaling would need room sharding + sticky routing (see the architecture notes).
+### Scaling (multi-core)
+
+By default one process owns and ticks all rooms (≈1 CPU core). Set **`WORKERS>1`**
+to run the **cluster** ([`server/cluster.js`](server/cluster.js)): a thin TCP
+gateway on `PORT` routes each connection to a worker by the room code in the URL
+(`?room=CODE` — the code's first char encodes its owning worker, so routing is
+stateless and survives restarts). Each worker is a full server with its own rooms
+and SQLite DB (`minesim-w{N}.db`); the gateway also serves `/admin`, aggregating
+the workers over IPC. This spreads rooms across cores while keeping each room's
+authoritative sim on one worker.
+
+The simulation itself is tuned for density: collision uses an O(1) occupancy
+index, idle rooms tick adaptively (down to ~5 Hz until something moves), and
+persistence runs off the main thread.
+
+```bash
+WORKERS=4 node server.js     # 4 workers behind the gateway
+```
 
 **Environment variables**
 
@@ -409,6 +425,8 @@ every game where it was. **Mount a volume at `DATA_DIR`** for it to survive.
 | `DATA_DIR` | `/data` (Docker) | Holds the admin-password `.env` **and** `minesim.db` — **mount a volume**. |
 | `ADMIN_PASS` | — | Override the admin password (else generated/persisted). |
 | `ALLOWED_ORIGINS` | — | Comma-separated WS origin allow-list (else same-origin). |
+| `TEST_MODE` | `false` | **Load-testing only** — lifts the per-IP connection cap, rate limiter and join-throttle so one machine can stress the server (`scripts/loadtest.js`). Also readable from a `TEST_MODE=true` line in the `.env`. Never leave on in production. |
+| `WORKERS` | `1` | `>1` runs the multi-core cluster (gateway + N workers, one SQLite DB per worker). |
 
 ---
 

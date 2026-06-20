@@ -5,16 +5,25 @@
 const { roomBroadcast } = require('./transport');
 const { sessionSummary } = require('../admin');
 
-function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000, reapMs = 60000, persistMs = 15000, log = console }) {
+function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000, reapMs = 60000, persistMs = 15000,
+  idleEvery = 6, idleActiveMs = 1500, log = console }) {
   const dt = 1 / tickHz;
   let tickN = 0;
 
   const tick = setInterval(() => {
     try {
       const doNet = (++tickN % netEvery === 0);
+      const now = Date.now();
       for (const room of rooms.rooms.values()) {
         if (room.clients.size === 0) continue;     // frozen while nobody is connected
-        room.world.tick(dt);
+
+        // Adaptive tick: a room where nothing is moving and no command arrived
+        // recently is "idle" — tick it only every `idleEvery`-th frame (with the
+        // matching larger dt) to free the CPU for busy rooms. Any motion or
+        // command instantly returns it to full rate.
+        const active = room.world.anyMoving() || (now - (room.lastActivity || 0) < idleActiveMs);
+        if (active) { room._skip = 0; } else if (((room._skip = (room._skip || 0) + 1) % idleEvery) !== 0) { continue; }
+        room.world.tick(active ? dt : dt * idleEvery);
         if (!doNet) continue;
 
         const live = room.world.liveDelta();

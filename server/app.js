@@ -14,9 +14,10 @@ const { startLoops } = require('./loop');
 const { RateLimiter } = require('./rate-limit');
 const { parseOrigins, verifyOrigin } = require('./security');
 const { Store } = require('./store');
-const { loadOrCreateAdminPass } = require('../admin');
+const { loadOrCreateAdminPass, readEnvVar } = require('../admin');
 
 const ROOT = path.join(__dirname, '..');
+const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 
 function createServer(opts = {}) {
   const config = {
@@ -43,8 +44,12 @@ function createServer(opts = {}) {
   if (dbFile) {
     try { store = new Store(dbFile); } catch (e) { console.error('[store] disabled (open failed):', e.message); }
   }
-  const rooms = new RoomManager({ maxRooms: config.maxRooms, graceMs: config.graceMs, store });
+  const rooms = new RoomManager({ maxRooms: config.maxRooms, graceMs: config.graceMs, store, shard: opts.shard || null });
   rooms.loadFromStore();
+
+  // Load test mode: lifts all per-IP / per-connection anti-abuse limits. Read from
+  // an explicit option, the TEST_MODE env var, or a TEST_MODE line in the .env.
+  const testMode = opts.testMode ?? truthy(process.env.TEST_MODE ?? readEnvVar(envFile, 'TEST_MODE'));
 
   const app = express();
   app.use(adminRouter({ rooms, adminUser, adminPass, graceMs: config.graceMs }));
@@ -56,20 +61,24 @@ function createServer(opts = {}) {
     maxPayload: config.maxPayload,
     verifyClient: (info) => verifyOrigin(info, config.allowedOrigins),
   });
-  setupWebsocket(wss, { rooms, limiter: new RateLimiter(config.rate) });
+  setupWebsocket(wss, { rooms, limiter: new RateLimiter(config.rate), testMode });
   const loops = startLoops({ rooms, wss, tickHz: config.tickHz, netEvery: config.netEvery });
 
   function stop(cb) {
     loops.stop();
-    try { rooms.saveAll(); } catch (e) { console.error('[store] final save failed:', e.message); }
-    if (store) store.close();
-    for (const ws of wss.clients) ws.terminate();
-    wss.close(() => {
-      if (server.listening) server.close(cb); else if (cb) cb();
-    });
+    Promise.resolve()
+      .then(() => rooms.saveAll())                 // async final save (awaits gzip)
+      .catch((e) => console.error('[store] final save failed:', e.message))
+      .finally(() => {
+        if (store) store.close();
+        for (const ws of wss.clients) ws.terminate();
+        wss.close(() => {
+          if (server.listening) server.close(cb); else if (cb) cb();
+        });
+      });
   }
 
-  return { app, server, wss, rooms, store, adminUser, adminPass, adminPassSource, envFile, dbFile, config, stop };
+  return { app, server, wss, rooms, store, testMode, adminUser, adminPass, adminPassSource, envFile, dbFile, config, stop };
 }
 
 module.exports = { createServer };

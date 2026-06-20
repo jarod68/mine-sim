@@ -5,6 +5,8 @@
 
 const Database = require('better-sqlite3');
 const zlib = require('zlib');
+const { promisify } = require('util');
+const gzip = promisify(zlib.gzip);
 
 class Store {
   constructor(file) {
@@ -41,14 +43,18 @@ class Store {
   }
 
   // ── rooms ──
-  saveRoom(meta, snapshot) {
+  // `json` is a pre-serialised snapshot string (World.snapshotJson). gzip runs
+  // off the main thread (async) so persisting many rooms never stalls the tick;
+  // only the fast SQLite write is synchronous.
+  async saveRoom(meta, json) {
+    const blob = await gzip(typeof json === 'string' ? json : JSON.stringify(json));
     this._upsertRoom.run({
       code: meta.code,
       createdAt: meta.createdAt ?? null,
       peakClients: meta.peakClients ?? 0,
       totalJoins: meta.totalJoins ?? 0,
       emptySince: meta.emptySince ?? null,
-      snapshot: zlib.gzipSync(JSON.stringify(snapshot)),
+      snapshot: blob,
       updatedAt: Date.now(),
     });
   }
