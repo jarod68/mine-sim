@@ -38,7 +38,28 @@ describe('Net — sending', () => {
     net.select('OHT01', false); expect(ws.lastSent()).toEqual({ t: 'select', label: 'OHT01', on: false });
     net.reset(); expect(ws.lastSent()).toEqual({ t: 'reset' });
     net.create(); expect(ws.lastSent()).toEqual({ t: 'create' });
-    net.join('ABCDE'); expect(ws.lastSent()).toEqual({ t: 'join', room: 'ABCDE' });
+  });
+
+  it('join() re-opens the socket routed to the room (?room=) and joins on open', () => {
+    const { net, ws } = connectedNet();
+    net.join('abcde');                                   // typed code, lower-case
+    const ws2 = FakeWebSocket.instances.at(-1);
+    expect(ws2).not.toBe(ws);                            // a fresh socket, routed to the owner
+    expect(ws2.url).toContain('room=ABCDE');
+    expect(ws2.sent.length).toBe(0);                     // nothing sent until it opens
+    ws2.open();
+    expect(ws2.lastSent()).toEqual({ t: 'join', room: 'ABCDE' });
+  });
+
+  it('join() on a socket already routed to the room reuses it', () => {
+    const net = new Net();
+    net.join('XYZAB');                                   // sets _urlRoom + reconnects
+    const ws = FakeWebSocket.instances.at(-1);
+    ws.open();
+    expect(ws.lastSent()).toEqual({ t: 'join', room: 'XYZAB' });
+    net.join('XYZAB');                                   // same room — no new socket
+    expect(FakeWebSocket.instances.at(-1)).toBe(ws);
+    expect(ws.lastSent()).toEqual({ t: 'join', room: 'XYZAB' });
   });
 });
 

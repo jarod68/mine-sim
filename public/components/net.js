@@ -7,6 +7,10 @@ export class Net {
   constructor() {
     this.ws = null;
     this.room = null;        // current room code (set once joined)
+    // Room from the page URL — used only to route the FIRST connection to the
+    // owning worker in cluster mode (harmless single-process). The lobby still
+    // sends the join; `room` is set on 'joined'.
+    try { this._urlRoom = new URL(location.href).searchParams.get('room')?.toUpperCase() || null; } catch { this._urlRoom = null; }
     this.onState = null;     // (state) => void
     this.onLive = null;      // ({ credit, vehicles, blocks }) => void
     this.onRoads = null;     // (cells) => void  — another client edited the roads
@@ -18,15 +22,19 @@ export class Net {
     this._buyQ = [];         // FIFO resolvers for buy() acknowledgements
     this._crusherQ = [];     // FIFO resolvers for buyCrusher() acknowledgements
     this._queue = [];        // commands buffered until the socket is open
+    this._pendingJoin = null; // code to (re)join as soon as the socket opens
     this._connect();
   }
 
   _connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    this.ws = new WebSocket(`${proto}://${location.host}`);
+    const code = this.room || this._urlRoom;     // route this socket to the room's worker
+    const q = code ? `/?room=${encodeURIComponent(code)}` : '';
+    this.ws = new WebSocket(`${proto}://${location.host}${q}`);
     this.ws.onopen = () => {
-      // On reconnect, re-join the same room first so queued commands land in it.
-      if (this.room) this.ws.send(JSON.stringify({ t: 'join', room: this.room }));
+      // (Re)join first so this socket — and any queued commands — land in the room.
+      const join = this.room || this._pendingJoin;
+      if (join) this.ws.send(JSON.stringify({ t: 'join', room: join }));
       for (const m of this._queue) this.ws.send(m);
       this._queue.length = 0;
     };
@@ -34,8 +42,15 @@ export class Net {
     this.ws.onclose = () => setTimeout(() => this._connect(), 800); // auto-reconnect
   }
 
+  // Deliberately drop the current socket and open a fresh one (e.g. to re-route to
+  // a different worker). Suppresses the auto-reconnect of the socket being closed.
+  _reconnect() {
+    if (this.ws) { this.ws.onclose = null; this.ws.onerror = null; try { this.ws.close(); } catch { /* already gone */ } }
+    this._connect();
+  }
+
   _handle(m) {
-    if (m.t === 'joined') { this.room = m.room; this.onJoined?.(m.room); }
+    if (m.t === 'joined') { this.room = m.room; this._pendingJoin = null; this.onJoined?.(m.room); }
     else if (m.t === 'joinError') { this.onJoinError?.(m.reason); }
     else if (m.t === 'state') this.onState?.(m.state);
     else if (m.t === 'live') this.onLive?.(m);
@@ -100,7 +115,22 @@ export class Net {
   }
 
   create()                { this._send({ t: 'create' }); }
-  join(room)              { this._send({ t: 'join', room }); }
+
+  // Join an existing room by code. In cluster mode the room lives on the single
+  // worker that owns its code, and the gateway routes connections by `?room=`.
+  // The lobby socket may be on a different worker, so re-open it routed to the
+  // owner before joining (harmless single-process). The join is sent on open.
+  join(room) {
+    const code = String(room).toUpperCase();
+    this._pendingJoin = code;
+    if (this._urlRoom === code) {
+      // already routed to this room's worker — just (re)send the join
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ t: 'join', room: code }));
+      return;
+    }
+    this._urlRoom = code;
+    this._reconnect();
+  }
 
   roads(cells)            { this._send({ t: 'roads', cells }); }
   control(label, cmd)     { this._send({ t: 'control', label, ...cmd }); }

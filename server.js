@@ -1,9 +1,15 @@
-// Entry point: build the server (see server/app.js) and start listening.
-const { createServer } = require('./server/app');
-
+// Entry point. With WORKERS>1, run the multi-core cluster (gateway + workers);
+// otherwise a single-process server.
 const PORT = process.env.PORT || 3200;
+
+if (+process.env.WORKERS > 1) {
+  require('./server/cluster').start();
+  return;
+}
+
+const { createServer } = require('./server/app');
 const instance = createServer();
-const { server, rooms, dbFile, adminUser, adminPass, adminPassSource, envFile } = instance;
+const { server, rooms, dbFile, testMode, adminUser, adminPass, adminPassSource, envFile } = instance;
 
 // A fatal error leaves the authoritative state possibly corrupt — log it and exit
 // so the process manager / container restarts on a clean slate (rather than
@@ -29,4 +35,5 @@ server.listen(PORT, () => {
   console.log(`mine-sim running on http://localhost:${PORT}`);
   console.log(`[admin] http://localhost:${PORT}/admin  user=${adminUser}  pass=${adminPass}  (${adminPassSource}: ${envFile})`);
   console.log(`[store] ${dbFile || 'disabled'}  (restored ${rooms.size} room(s))`);
+  if (testMode) console.warn('[TEST_MODE] per-IP / rate-limit protections DISABLED — do not leave on in production');
 });
