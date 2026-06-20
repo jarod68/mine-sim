@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateMine,
-  rebuildPrepZones,
+  rebuildVeins,
   BLOCK_TONNAGE,
   ORE_TYPES,
   PREP_PASSES,
-  PREP_ZONE_AREA,
-  PREP_ZONE_COUNT,
+  VEIN_AREA,
+  VEIN_COUNT,
 } from '../../game/mine.js';
 
 describe('mine constants', () => {
@@ -84,32 +84,32 @@ describe('rich prep veins', () => {
   it('is deterministic for a given seed', () => {
     const a = generateMine(190, 139, 7);
     const b = generateMine(190, 139, 7);
-    expect(JSON.stringify(a.prepZones)).toBe(JSON.stringify(b.prepZones));
-    expect(JSON.stringify(generateMine(190, 139, 8).prepZones)).not.toBe(JSON.stringify(a.prepZones));
+    expect(JSON.stringify(a.veins)).toBe(JSON.stringify(b.veins));
+    expect(JSON.stringify(generateMine(190, 139, 8).veins)).not.toBe(JSON.stringify(a.veins));
   });
 
   // index every prep block by its zone id
-  function zoneBlocks() {
+  function veinBlocks() {
     const byId = new Map();
     for (const row of mine.blocks)
-      for (const b of row) if (b.prep) (byId.get(b.prepZone) || byId.set(b.prepZone, []).get(b.prepZone)).push(b);
+      for (const b of row) if (b.prep) (byId.get(b.veinId) || byId.set(b.veinId, []).get(b.veinId)).push(b);
     return byId;
   }
 
-  it('stamps PREP_ZONE_COUNT zones, all of equal area PREP_ZONE_AREA', () => {
-    expect(mine.prepZones).toHaveLength(PREP_ZONE_COUNT);
-    const byId = zoneBlocks();
-    expect(byId.size).toBe(PREP_ZONE_COUNT);
-    for (const [, blocks] of byId) expect(blocks).toHaveLength(PREP_ZONE_AREA);
-    for (const z of mine.prepZones) expect(z.remaining).toBe(PREP_ZONE_AREA);
+  it('stamps VEIN_COUNT zones, all of equal area VEIN_AREA', () => {
+    expect(mine.veins).toHaveLength(VEIN_COUNT);
+    const byId = veinBlocks();
+    expect(byId.size).toBe(VEIN_COUNT);
+    for (const [, blocks] of byId) expect(blocks).toHaveLength(VEIN_AREA);
+    for (const z of mine.veins) expect(z.remaining).toBe(VEIN_AREA);
   });
 
   it('produces irregular shapes (bounding boxes are not all identical)', () => {
-    const dims = mine.prepZones.map((z) => `${z.x1 - z.x0 + 1}x${z.y1 - z.y0 + 1}`);
+    const dims = mine.veins.map((z) => `${z.x1 - z.x0 + 1}x${z.y1 - z.y0 + 1}`);
     expect(new Set(dims).size).toBeGreaterThan(1);       // width/height vary
     // an irregular blob's bounding box is larger than its (equal) area
-    for (const z of mine.prepZones)
-      expect((z.x1 - z.x0 + 1) * (z.y1 - z.y0 + 1)).toBeGreaterThanOrEqual(PREP_ZONE_AREA);
+    for (const z of mine.veins)
+      expect((z.x1 - z.x0 + 1) * (z.y1 - z.y0 + 1)).toBeGreaterThanOrEqual(VEIN_AREA);
   });
 
   it('never lets two zones share or touch (8-adjacency) a block', () => {
@@ -119,7 +119,7 @@ describe('rich prep veins', () => {
         for (let dy = -1; dy <= 1; dy++)
           for (let dx = -1; dx <= 1; dx++) {
             const n = mine.blocks[b.y + dy]?.[b.x + dx];
-            if (n && n.prep) expect(n.prepZone).toBe(b.prepZone);   // same zone only
+            if (n && n.prep) expect(n.veinId).toBe(b.veinId);   // same zone only
           }
       }
   });
@@ -138,10 +138,10 @@ describe('rich prep veins', () => {
   });
 
   it('rebuilds the same zone rectangles from the grid alone', () => {
-    const rebuilt = rebuildPrepZones(mine.blocks);
-    expect(rebuilt).toHaveLength(mine.prepZones.length);
+    const rebuilt = rebuildVeins(mine.blocks);
+    expect(rebuilt).toHaveLength(mine.veins.length);
     for (let i = 0; i < rebuilt.length; i++) {
-      const a = mine.prepZones[i], b = rebuilt[i];
+      const a = mine.veins[i], b = rebuilt[i];
       expect([b.x0, b.y0, b.x1, b.y1]).toEqual([a.x0, a.y0, a.x1, a.y1]);
       expect(b.remaining).toBe(a.remaining);
     }

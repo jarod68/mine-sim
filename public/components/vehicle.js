@@ -148,6 +148,7 @@ export class Fleet {
     this.dpr = DPR;
     this.vehicles = [];
     this.byLabel = new Map();
+    this.byId = new Map();        // numeric id → Vehicle (binary position frames)
     this.selected = null;
     this.selectionRect = null;
     this.onControl = null;        // (label, { dir }|{ release }) → POST /api/control
@@ -196,16 +197,29 @@ export class Fleet {
       } else {
         v.applyServer(d);
       }
+      v.id = d.id;
+      this.byId.set(d.id, v);
     }
     // keep `selected` reference pointing at the live object
     if (this.selected) this.selected = this.byLabel.get(this.selected.label) || null;
   }
 
-  // Merge live deltas (partial per-vehicle field updates) by label.
+  // Merge live deltas (partial NON-positional field updates) by id.
   applyDeltas(list) {
     for (const d of list) {
-      const v = this.byLabel.get(d.label);
-      if (v) v.applyDelta(d);            // unknown labels resolve on next full state
+      const v = this.byId.get(d.id);
+      if (v) v.applyDelta(d);            // unknown ids resolve on next full state
+    }
+  }
+
+  // Apply a binary positions frame (decoded by Net): lerp targets + heading/cell.
+  applyPositions(records) {
+    for (const r of records) {
+      const v = this.byId.get(r.id);
+      if (!v) continue;
+      v.tx = r.x; v.ty = r.y;
+      v.heading = r.heading;
+      v.gx = r.gx; v.gy = r.gy;
     }
   }
 

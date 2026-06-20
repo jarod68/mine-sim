@@ -5,7 +5,7 @@
 // modules (vehicle / roads / autopilot / min-heap / constants); this file is the
 // orchestrator: world setup, the tick loop, commands, economy, snapshots.
 
-const { generateMine, rebuildPrepZones, setOre, BLOCK_TONNAGE } = require('./mine');
+const { generateMine, rebuildVeins, setOre, BLOCK_TONNAGE } = require('./mine');
 const { Vehicle } = require('./vehicle');
 const { Roads } = require('./roads');
 const { Autopilot } = require('./autopilot');
@@ -116,6 +116,7 @@ class World {
     const oht3 = mk({ type: 'oht', label: 'OHT03', gx: park.x, gy: park.y, len: zone * 1.445, wid: zone * 0.7 });
     const oht4 = mk({ type: 'oht', label: 'OHT04', gx: park.x, gy: park.y, len: zone * 1.445, wid: zone * 0.7 });
     this.vehicles = [lv, hex1, hex2, hex3, hex4, oht1, oht2, oht3, oht4];
+    this.vehicles.forEach((v, i) => { v.id = i; });   // stable numeric id (binary pos frame)
     this.byLabel = new Map(this.vehicles.map((v) => [v.label, v]));
     this._placeTrucksInParking([oht1, oht2, oht3, oht4]);   // line them up "en bataille"
 
@@ -136,14 +137,15 @@ class World {
 
     // Per-vehicle "move to point" orders (vehicle → { gx, gy, path, i, stuck }).
     this._moveTo = new Map();
-    // Dozers actively preparing a rich vein (vehicle → { zoneId, dir, lastBlock }).
+    // Dozers actively preparing a rich vein (vehicle → { veinId, dir, lastBlock }).
     this._dozerPrep = new Map();
     this._boughtCrushers = 0;   // extra crushers the player has purchased
 
 
 
     // Delta-broadcast baselines (last values sent to clients).
-    this._lastVeh = new Map();
+    this._lastVeh = new Map();    // id → last non-positional fields
+    this._lastPos = new Map();    // id → last position signature
     this._lastCredit = null;
     this._debug = new Set();   // labels with debug-path visualisation enabled
     this._gridDirty = true; this._gridJson = null;   // cached mine-grid JSON (persistence)
@@ -199,7 +201,7 @@ class World {
     this._boughtCrushers = snap.boughtCrushers || 0;
     this.dirty = new Map();
     this.mine = { cols: COLS, rows: ROWS, blocks: snap.blocks };
-    this.mine.prepZones = rebuildPrepZones(snap.blocks);   // derived from the per-block prep fields
+    this.mine.veins = rebuildVeins(snap.blocks);   // derived from the per-block prep fields
     this.crushers = snap.crushers || [];
 
     this.roads = new Roads(this.grid);
@@ -209,6 +211,7 @@ class World {
     this.roads.setNetwork(snap.roads || []);
 
     this.vehicles = (snap.vehicles || []).map((d) => Vehicle.fromSnapshot(d, this.grid));
+    this.vehicles.forEach((v, i) => { v.id = i; });
     this.byLabel = new Map(this.vehicles.map((v) => [v.label, v]));
 
     this.autopilot = new Autopilot(this.grid, this.roads, {
@@ -229,6 +232,7 @@ class World {
     for (const [lbl, t] of snap.moveTo || []) this.moveTo(lbl, t.gx, t.gy);
 
     this._lastVeh = new Map();
+    this._lastPos = new Map();
     this._lastCredit = null;
     this._debug = new Set();
     this._gridDirty = true; this._gridJson = null;
@@ -357,7 +361,7 @@ class World {
   // a working dozer tallies one pass per block it enters and reveals a block once
   // it reaches prepMax passes. _dozerStep drives the back-and-forth line sweep.
   _updateDozers() {
-    const zones = this.mine.prepZones;
+    const zones = this.mine.veins;
     if (!zones || !zones.length) return;
     for (const v of this.vehicles) {
       if (v.type !== 'dozer') continue;
@@ -365,13 +369,13 @@ class World {
       const bx = Math.floor(v.gx / 2), by = Math.floor(v.gy / 2);
       const st = this._dozerPrep.get(v);
       if (st) {
-        const z = zones[st.zoneId];
+        const z = zones[st.veinId];
         if (!z || z.remaining <= 0) { this._dozerPrep.delete(v); v._prepLine = null; continue; }
         const k = `${bx},${by}`;
         if (k !== st.lastBlock) {                    // entered a new block → one pass
           st.lastBlock = k;
           const b = this.mine.blocks[by]?.[bx];
-          if (b && b.prep && !b.prepDone && b.prepZone === st.zoneId) {
+          if (b && b.prep && !b.prepDone && b.veinId === st.veinId) {
             b.prepPasses = Math.min(b.prepMax, b.prepPasses + 1);
             if (b.prepPasses >= b.prepMax) this._revealPrep(b, z);
             else this._markDirty(b);
@@ -379,8 +383,8 @@ class World {
         }
         continue;
       }
-      const id = this._nearestPrepZone(bx, by, DOZER_PREP_RANGE);
-      if (id != null) this._dozerPrep.set(v, { zoneId: id, dir: 1, lastBlock: null });
+      const id = this._nearestVein(bx, by, DOZER_PREP_RANGE);
+      if (id != null) this._dozerPrep.set(v, { veinId: id, dir: 1, lastBlock: null });
     }
   }
 
@@ -394,16 +398,16 @@ class World {
   // Zone of the nearest un-revealed vein BLOCK within R blocks (Chebyshev), or
   // null. Scans actual blocks — not bounding boxes — so an irregular zone's empty
   // bbox corners don't trigger (or mis-pick) a start.
-  _nearestPrepZone(bx, by, R) {
+  _nearestVein(bx, by, R) {
     let best = null, bestD = Infinity;
     for (let dy = -R; dy <= R; dy++)
       for (let dx = -R; dx <= R; dx++) {
         const b = this.mine.blocks[by + dy]?.[bx + dx];
         if (!b || !b.prep || b.prepDone) continue;
-        const z = this.mine.prepZones[b.prepZone];
+        const z = this.mine.veins[b.veinId];
         if (!z || z.remaining <= 0) continue;
         const d = Math.max(Math.abs(dx), Math.abs(dy));
-        if (d < bestD) { bestD = d; best = b.prepZone; }
+        if (d < bestD) { bestD = d; best = b.veinId; }
       }
     return best;
   }
@@ -414,7 +418,7 @@ class World {
   _dozerStep(v) {
     const st = this._dozerPrep.get(v);
     if (!st) return null;
-    const z = this.mine.prepZones[st.zoneId];
+    const z = this.mine.veins[st.veinId];
     if (!z || z.remaining <= 0) return null;
     const bx = Math.floor(v.gx / 2), by = Math.floor(v.gy / 2);
     // Topmost block-row still hiding ore, AND that row's own unrevealed span — not
@@ -425,7 +429,7 @@ class World {
       let mn = Infinity, mx = -Infinity;
       for (let rx = z.x0; rx <= z.x1; rx++) {
         const b = this.mine.blocks[ry][rx];
-        if (b && b.prep && b.prepZone === st.zoneId && !b.prepDone) { if (rx < mn) mn = rx; if (rx > mx) mx = rx; }
+        if (b && b.prep && b.veinId === st.veinId && !b.prepDone) { if (rx < mn) mn = rx; if (rx > mx) mx = rx; }
       }
       if (mn !== Infinity) { row = ry; rowMin = mn; rowMax = mx; }
     }
@@ -730,6 +734,7 @@ class World {
       v = new Vehicle({ type: 'pickup', label: this._nextLabel('LV'), gx: cell.gx, gy: cell.gy, len: zone * 0.95, wid: zone * 0.57 });
     }
     v.place(this.grid);
+    v.id = this.vehicles.length;          // stable id = append index
     this.vehicles.push(v);
     this.byLabel.set(v.label, v);
     return { ok: true, credit: this.credit, label: v.label, vehicle: this._vehicle(v) };
@@ -816,7 +821,7 @@ class World {
 
   _vehicle(v) {
     return {
-      label: v.label, type: v.type, model: v.model,
+      id: v.id, label: v.label, type: v.type, model: v.model,
       gx: v.gx, gy: v.gy, x: v.x, y: v.y, heading: v.heading,
       len: v.len, wid: v.wid,
       load: v.load, loadOre: v.loadOre, payload: v.payload, bucket: v.bucket,
@@ -843,17 +848,28 @@ class World {
       maxExtraCrushers: MAX_EXTRA_CRUSHERS,
       roads: this.roads.serialize(),
       vehicles: this.vehicles.map((v) => this._vehicle(v)),
-      blocks: this.mine.blocks.map((row) => row.map((b) => this._publicBlock(b))),
+      // Only the "significant" blocks (explored or a rich vein) — the client
+      // defaults the rest to unexplored. Cuts the initial snapshot from the whole
+      // 26k-block grid to the small revealed/vein subset.
+      blocks: this._significantBlocks(),
     };
   }
 
-  // Dynamic fields that may change tick to tick (rounded to cut float churn).
+  // Flat list of blocks worth sending: explored (revealed composition) or part of
+  // a rich vein (rendered specially). Everything else is implicitly unexplored.
+  _significantBlocks() {
+    const out = [];
+    for (const row of this.mine.blocks)
+      for (const b of row) if (b.explored || b.prep) out.push(this._publicBlock(b));
+    return out;
+  }
+
+  // Dynamic NON-positional fields that may change tick to tick. Position
+  // (x/y/heading/gx/gy) travels in the compact binary `pos` frame instead — see
+  // positionsDelta() — so the JSON delta only carries the rarely-changing rest.
   _vehFields(v) {
     return {
-      label: v.label,
-      x: Math.round(v.x), y: Math.round(v.y),
-      heading: Math.round(v.heading * 1000) / 1000,
-      gx: v.gx, gy: v.gy,
+      id: v.id,
       load: Math.round(v.load),
       loadOre: v.loadOre,
       task: v.task ? { kind: v.task.kind, progress: Math.round(v.task.progress * 100) / 100 } : null,
@@ -864,6 +880,33 @@ class World {
     };
   }
 
+  // Binary frame of every vehicle whose position changed since the last call:
+  // [u8 type=1][u16 count]{ u16 id, f32 x, f32 y, f32 heading, u16 gx, u16 gy }.
+  // Returns a Buffer, or null when nothing moved. ~18 bytes/vehicle vs verbose JSON.
+  positionsDelta() {
+    const recs = [];
+    for (const v of this.vehicles) {
+      const sig = `${Math.round(v.x)},${Math.round(v.y)},${Math.round(v.heading * 1000)},${v.gx},${v.gy}`;
+      if (this._lastPos.get(v.id) === sig) continue;
+      this._lastPos.set(v.id, sig);
+      recs.push(v);
+    }
+    if (!recs.length) return null;
+    const buf = Buffer.allocUnsafe(3 + recs.length * 18);
+    buf.writeUInt8(1, 0);
+    buf.writeUInt16LE(recs.length, 1);
+    let o = 3;
+    for (const v of recs) {
+      buf.writeUInt16LE(v.id, o); o += 2;
+      buf.writeFloatLE(v.x, o); o += 4;
+      buf.writeFloatLE(v.y, o); o += 4;
+      buf.writeFloatLE(v.heading, o); o += 4;
+      buf.writeUInt16LE(v.gx, o); o += 2;
+      buf.writeUInt16LE(v.gy, o); o += 2;
+    }
+    return buf;
+  }
+
   // Delta snapshot: only vehicles whose fields changed (and only those fields),
   // credit only if it changed, plus any blocks touched since last call. Returns
   // null when nothing changed at all, so the server can skip the frame entirely.
@@ -871,13 +914,13 @@ class World {
     const vehicles = [];
     for (const v of this.vehicles) {
       const cur = this._vehFields(v);
-      const prev = this._lastVeh.get(v.label);
-      this._lastVeh.set(v.label, cur);
+      const prev = this._lastVeh.get(v.id);
+      this._lastVeh.set(v.id, cur);
       if (!prev) { vehicles.push(cur); continue; } // first time → send all fields
       let d = null;
       for (const k in cur) {
-        if (k === 'label') continue;
-        if (!fieldEq(cur[k], prev[k])) (d ||= { label: cur.label })[k] = cur[k];
+        if (k === 'id') continue;
+        if (!fieldEq(cur[k], prev[k])) (d ||= { id: cur.id })[k] = cur[k];
       }
       if (d) vehicles.push(d);
     }

@@ -14,6 +14,8 @@ export class Net {
     this.onState = null;     // (state) => void
     this.onLive = null;      // ({ credit, vehicles, blocks }) => void
     this.onRoads = null;     // (cells) => void  — another client edited the roads
+    this.onParking = null;   // (rect, cells) => void  — the parking pad was resized
+    this.onPositions = null; // (records) => void  — binary vehicle position frame
     this.onJoined = null;    // (code) => void
     this.onJoinError = null; // (reason) => void
     this.onVehicle = null;   // (vehicle) => void  — a new asset was bought
@@ -31,6 +33,7 @@ export class Net {
     const code = this.room || this._urlRoom;     // route this socket to the room's worker
     const q = code ? `/?room=${encodeURIComponent(code)}` : '';
     this.ws = new WebSocket(`${proto}://${location.host}${q}`);
+    this.ws.binaryType = 'arraybuffer';   // decode the binary `pos` frame synchronously
     this.ws.onopen = () => {
       // (Re)join first so this socket — and any queued commands — land in the room.
       const join = this.room || this._pendingJoin;
@@ -38,7 +41,10 @@ export class Net {
       for (const m of this._queue) this.ws.send(m);
       this._queue.length = 0;
     };
-    this.ws.onmessage = (e) => this._handle(JSON.parse(e.data));
+    this.ws.onmessage = (e) => {
+      if (typeof e.data === 'string') this._handle(JSON.parse(e.data));
+      else this._handlePositions(e.data);     // ArrayBuffer → binary positions frame
+    };
     this.ws.onclose = () => setTimeout(() => this._connect(), 800); // auto-reconnect
   }
 
@@ -55,6 +61,7 @@ export class Net {
     else if (m.t === 'state') this.onState?.(m.state);
     else if (m.t === 'live') this.onLive?.(m);
     else if (m.t === 'roads') this.onRoads?.(m.cells);
+    else if (m.t === 'parking') this.onParking?.(m.rect, m.cells);
     else if (m.t === 'vehicle') this.onVehicle?.(m.vehicle);
     else if (m.t === 'drilled') {
       const k = `${m.x},${m.y}`;
@@ -70,6 +77,28 @@ export class Net {
       const r = this._crusherQ.shift();
       if (r) r(m);
     }
+  }
+
+  // Decode the binary positions frame (see World.positionsDelta):
+  // [u8 type=1][u16 count]{ u16 id, f32 x, f32 y, f32 heading, u16 gx, u16 gy }.
+  _handlePositions(buf) {
+    const dv = new DataView(buf);
+    if (dv.byteLength < 3 || dv.getUint8(0) !== 1) return;
+    const n = dv.getUint16(1, true);
+    const recs = [];
+    let o = 3;
+    for (let i = 0; i < n && o + 18 <= dv.byteLength; i++) {
+      recs.push({
+        id: dv.getUint16(o, true),
+        x: dv.getFloat32(o + 2, true),
+        y: dv.getFloat32(o + 6, true),
+        heading: dv.getFloat32(o + 10, true),
+        gx: dv.getUint16(o + 14, true),
+        gy: dv.getUint16(o + 16, true),
+      });
+      o += 18;
+    }
+    this.onPositions?.(recs);
   }
 
   _send(o) {

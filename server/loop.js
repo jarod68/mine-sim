@@ -27,16 +27,20 @@ function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000
         if (!doNet) continue;
 
         const live = room.world.liveDelta();
+        const posBuf = room.world.positionsDelta();   // binary vehicle positions
         const debug = room.world.hasDebug() ? room.world.debugPaths() : {};
         const debugStr = JSON.stringify(debug);
         const debugChanged = debugStr !== room.lastDebugStr;
         room.lastDebugStr = debugStr;
-        if (!live && !debugChanged) continue;
+        if (!live && !debugChanged && !posBuf) continue;
 
-        const msg = { t: 'live', vehicles: live?.vehicles || [], blocks: live?.blocks || [] };
-        if (live && 'credit' in live) msg.credit = live.credit;
-        if (debugChanged || Object.keys(debug).length) msg.debug = debug;
-        roomBroadcast(room, msg);
+        if (live || debugChanged) {
+          const msg = { t: 'live', vehicles: live?.vehicles || [], blocks: live?.blocks || [] };
+          if (live && 'credit' in live) msg.credit = live.credit;
+          if (debugChanged || Object.keys(debug).length) msg.debug = debug;
+          roomBroadcast(room, msg);
+        }
+        if (posBuf) for (const ws of room.clients) if (ws.readyState === ws.OPEN) ws.send(posBuf);
       }
     } catch (err) {
       log.error('[tick] error (continuing):', err);

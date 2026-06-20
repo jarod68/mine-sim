@@ -117,10 +117,12 @@ function handleMessage(ws, raw, rooms, testMode = false) {
       roomBroadcast(room, { t: 'state', state: world.fullState() });
       rooms.logEvent('reset', room.code);
       break;
-    case 'resizeParking':
-      world.resizeParking(m.rect);
-      roomBroadcast(room, { t: 'state', state: world.fullState() });
+    case 'resizeParking': {
+      const rect = world.resizeParking(m.rect);
+      // Only the pad + road network changed — no need to resend the whole grid.
+      roomBroadcast(room, { t: 'parking', rect, cells: world.roads.serialize() });
       break;
+    }
   }
   rooms.markDirty(room);   // any command mutated the world → persist on next save
 }

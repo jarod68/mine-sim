@@ -46,9 +46,32 @@ function syncSelection(v) {
   selectedShovelLabel = next;
 }
 
-net.onState = (state) => (built ? refresh(state) : build(state));
+// The server sends only significant blocks (explored / veins); rebuild the full
+// grid here, defaulting every other cell to unexplored.
+function hydrateBlocks(state) {
+  if (!Array.isArray(state.blocks) || Array.isArray(state.blocks[0])) return; // already a grid
+  const grid = [];
+  for (let y = 0; y < state.rows; y++) {
+    const row = [];
+    for (let x = 0; x < state.cols; x++) row.push({ x, y, explored: false });
+    grid.push(row);
+  }
+  for (const b of state.blocks) grid[b.y][b.x] = b;
+  state.blocks = grid;
+}
+
+net.onState = (state) => { hydrateBlocks(state); built ? refresh(state) : build(state); };
 net.onLive = (data) => onLive(data);
+net.onPositions = (recs) => { if (fleet) fleet.applyPositions(recs); };
 net.onRoads = (cells) => { if (roads) roads.setNetwork(cells); };
+net.onParking = (rect, cells) => {     // another client resized the parking pad
+  if (!roads) return;
+  parkRect = { ...rect };
+  roads.setParking(rect);
+  roads.setNetwork(cells);
+  updateParkOverlay();
+  invalidateAll();
+};
 net.onVehicle = (v) => {           // a newly bought asset (no full-state reload)
   if (!fleet || !v) return;
   fleet.sync([v]);

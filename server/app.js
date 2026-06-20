@@ -59,6 +59,9 @@ function createServer(opts = {}) {
   const wss = new WebSocketServer({
     server,
     maxPayload: config.maxPayload,
+    // Compress large frames (the full-state snapshot is big, repetitive JSON);
+    // the threshold skips the tiny ~15 Hz live deltas so they don't pay the cost.
+    perMessageDeflate: { threshold: 1024 },
     verifyClient: (info) => verifyOrigin(info, config.allowedOrigins),
   });
   setupWebsocket(wss, { rooms, limiter: new RateLimiter(config.rate), testMode });

@@ -402,10 +402,14 @@ describe('World — setup & snapshots', () => {
     expect(adjacent).toBeGreaterThan(0);
   });
 
-  it('hides unexplored block composition in snapshots', () => {
+  it('omits unexplored blocks and never leaks hidden composition', () => {
     const state = w.fullState();
-    const anyHidden = state.blocks.flat().some((b) => b.explored === false && b.ore === undefined);
-    expect(anyHidden).toBe(true);
+    expect(Array.isArray(state.blocks)).toBe(true);
+    expect(state.blocks.length).toBeLessThan(state.cols * state.rows);   // unexplored omitted
+    for (const b of state.blocks) {
+      expect(b.explored === true || b.prep === true).toBe(true);          // only significant blocks
+      if (!b.explored) expect(b.ore).toBeUndefined();                     // veins never reveal ore
+    }
   });
 });
 
@@ -977,11 +981,11 @@ describe('rich prep veins (World)', () => {
   // A dozer placed one block above zone 0, registered with the world.
   function withDozer() {
     const w = new World();
-    const z = w.mine.prepZones[0];
+    const z = w.mine.veins[0];
     const g = w.grid;
     let pb = null;                              // a real zone-0 block (bbox corner may be empty)
     for (let y = z.y0; y <= z.y1 && !pb; y++)
-      for (let x = z.x0; x <= z.x1; x++) { const b = w.mine.blocks[y][x]; if (b.prep && b.prepZone === 0) { pb = b; break; } }
+      for (let x = z.x0; x <= z.x1; x++) { const b = w.mine.blocks[y][x]; if (b.prep && b.veinId === 0) { pb = b; break; } }
     const dz = new Vehicle({ type: 'dozer', label: 'DZ01', gx: pb.x * 2, gy: pb.y * 2, len: g.zoneW * 0.9, wid: g.zoneH * 0.6 });
     dz.place(g);
     w.vehicles.push(dz); w.byLabel.set('DZ01', dz);
@@ -990,7 +994,7 @@ describe('rich prep veins (World)', () => {
 
   it('refuses to drill an un-prepared prep block', () => {
     const w = new World();
-    const z = w.mine.prepZones[0];
+    const z = w.mine.veins[0];
     let pb = null;                              // a real vein block (bbox corner may be empty)
     for (let y = z.y0; y <= z.y1 && !pb; y++)
       for (let x = z.x0; x <= z.x1; x++) { const b = w.mine.blocks[y][x]; if (b.prep) { pb = b; break; } }
@@ -1007,7 +1011,7 @@ describe('rich prep veins (World)', () => {
 
   it('drops road cells laid on an un-prepared vein, allows them once revealed', () => {
     const w = new World();
-    const z = w.mine.prepZones[0];
+    const z = w.mine.veins[0];
     let pb = null;
     for (let y = z.y0; y <= z.y1 && !pb; y++)
       for (let x = z.x0; x <= z.x1; x++) { const b = w.mine.blocks[y][x]; if (b.prep) { pb = b; break; } }

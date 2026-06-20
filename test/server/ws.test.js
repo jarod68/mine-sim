@@ -5,7 +5,7 @@ import { createServer } from '../../server/app.js';
 // Collect inbound messages and await one of a given type.
 function collect(ws) {
   const msgs = [];
-  ws.on('message', (raw) => msgs.push(JSON.parse(raw)));
+  ws.on('message', (raw, isBinary) => { if (!isBinary) msgs.push(JSON.parse(raw)); });   // skip binary `pos` frames
   return {
     msgs,
     wait: (type, timeout = 3000) => new Promise((res, rej) => {
