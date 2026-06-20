@@ -4,9 +4,21 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-# Install production dependencies first (better layer caching).
+# Apply outstanding OS security patches from the base image.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
+# Install production dependencies first (better layer caching). npm is only needed
+# at build time; remove it (and corepack) afterwards — their bundled node_modules
+# are the only source of CVEs in this image and aren't used to run the server.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev \
+  && npm cache clean --force \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+            /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+  # perl-base ships in the base image but nothing here uses it (no installed
+  # reverse-deps); dropping it clears its Debian CVEs, incl. the only CRITICAL.
+  && apt-get purge -y --allow-remove-essential perl-base \
+  && rm -rf /var/lib/apt/lists/*
 
 # Server + game logic + static client.
 COPY . .
