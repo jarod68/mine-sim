@@ -6,7 +6,7 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 5180;
 
 export default defineConfig({
-  testDir: './test-visual',
+  testDir: './test/visual',
   // Serial: the fixtures share one static server and canvas screenshots are
   // sensitive to render/paint timing under parallel contention.
   fullyParallel: false,
@@ -15,7 +15,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   webServer: {
-    command: 'node test-visual/serve.cjs',
+    command: 'node test/visual/serve.cjs',
     port: PORT,
     reuseExistingServer: !process.env.CI,
   },

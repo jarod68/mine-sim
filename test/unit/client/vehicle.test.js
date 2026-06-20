@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Vehicle, Fleet } from '../../public/components/vehicle.js';
+import { Vehicle, Fleet } from '../../../public/components/vehicle.js';
 import { fakeCanvas } from './_helpers.js';
 
 const sample = (over = {}) => ({

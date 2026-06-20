@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { camera, applyCamera, toWorld, visibleRect, DPR } from '../../public/components/camera.js';
+import { camera, applyCamera, toWorld, visibleRect, DPR } from '../../../public/components/camera.js';
 
 describe('camera', () => {
   beforeEach(() => { camera.scale = 1; camera.ox = 0; camera.oy = 0; });

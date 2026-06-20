@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createServer } from '../../server/app.js';
+import { createServer } from '../../../server/app.js';
 
 describe('persistence (SQLite)', () => {
   const tmp = [];

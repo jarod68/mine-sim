@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import WebSocket from 'ws';
-import { createServer } from '../../server/app.js';
+import { createServer } from '../../../server/app.js';
 
 // Collect inbound messages and await one of a given type.
 function collect(ws) {

@@ -10,7 +10,7 @@
     "test:watch": "vitest",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
-    "test:load": "node test-load/loadtest.js",
+    "test:load": "node test/load/loadtest.js",
     "coverage": "vitest run --coverage",
     "prebuild": "npm run coverage",
     "build": "docker buildx create --name minesim-builder --driver docker-container --bootstrap --use 2>/dev/null || true && docker buildx build --builder minesim-builder --platform linux/amd64,linux/arm64 -t jarod68/mine-sim:latest --push .",

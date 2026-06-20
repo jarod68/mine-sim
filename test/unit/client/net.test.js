@@ -8,7 +8,7 @@ let Net;
 beforeEach(async () => {
   FakeWebSocket = installFakeWebSocket();
   // import after the global is stubbed (Net connects in its constructor)
-  ({ Net } = await import('../../public/components/net.js'));
+  ({ Net } = await import('../../../public/components/net.js'));
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 

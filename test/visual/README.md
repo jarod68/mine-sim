@@ -13,7 +13,7 @@ First run needs the browser once: `npx playwright install chromium`.
 
 ## How it works
 - [`serve.cjs`](serve.cjs) — a tiny static server rooted at the project, started
-  by [`../playwright.config.js`](../playwright.config.js) as its `webServer`, so
+  by [`../../playwright.config.js`](../../playwright.config.js) as its `webServer`, so
   fixtures can import the real modules from `/public/components/*`.
 - `fixtures/*.html` — minimal pages that import a component and draw it with
   fixed data, then set `window.__ready = true`.

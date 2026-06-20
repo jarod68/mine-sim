@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   World, Vehicle, Roads, Autopilot,
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST,
-} from '../../game/world.js';
+} from '../../../game/world.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

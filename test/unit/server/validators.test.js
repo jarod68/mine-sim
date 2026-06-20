@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateLobby, validateCommand, MAX_ROAD_CELLS } from '../../server/validators.js';
+import { validateLobby, validateCommand, MAX_ROAD_CELLS } from '../../../server/validators.js';
 
 const bounds = { cols: 10, rows: 8, zoneCols: 20, zoneRows: 16 };
 

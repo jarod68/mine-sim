@@ -143,7 +143,7 @@ last values sent per vehicle/credit and emits only what changed — per-vehicle
 field diffs, dirty blocks, and credit — or `null` when nothing changed (the frame
 is skipped entirely). This keeps bandwidth tiny even with a full fleet.
 
-**Autopilot** ([`Autopilot`](game/world.js)). Haul trucks navigate the
+**Autopilot** ([`Autopilot`](game/autopilot.js)). Haul trucks navigate the
 player-drawn network with a **cached distance field**:
 
 - A reverse BFS from each destination produces a shortest-path distance field
@@ -212,9 +212,9 @@ public/
     mine.js               Shared colour/label constants.
 scripts/
   capture-screenshots.js  Playwright script that regenerates docs/screenshots.
-test-unit/                Vitest suites (game / server / client).
-test-visual/              Playwright visual-regression tests (canvas renderers).
-test-load/                Standalone WebSocket load generator.
+test/unit/                Vitest suites (game / server / client).
+test/visual/              Playwright visual-regression tests (canvas renderers).
+test/load/                Standalone WebSocket load generator.
 eslint.config.js          ESLint (flat config); `npm run lint`.
 ```
 
@@ -362,31 +362,31 @@ Three kinds, one per directory (each has its own README):
 
 ```bash
 npm run lint              # ESLint (flat config)
-npm test                  # unit (Vitest)          → test-unit/
+npm test                  # unit (Vitest)          → test/unit/
 npm run coverage          # unit + coverage gate (istanbul)
-npm run test:visual       # visual regression (Playwright) → test-visual/
-npm run test:load -- ...  # WebSocket load generator → test-load/
+npm run test:visual       # visual regression (Playwright) → test/visual/
+npm run test:load -- ...  # WebSocket load generator → test/load/
 ```
 
-**Unit** ([`test-unit/`](test-unit)) — Vitest, split by layer:
+**Unit** ([`test/unit/`](test/unit)) — Vitest, split by layer:
 
 | Path | What it covers |
 | --- | --- |
-| `test-unit/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock, docking, dodge), parking layout & resize, shovel spacing & relocation, rich-vein dozer prep, a full **haul-cycle integration** run. |
-| `test-unit/game/mine.test.js` | Mine generation, ore deposits, rich veins (deterministic via seed). |
-| `test-unit/game/admin.test.js` | Auth, session snapshots, **password persistence** across restarts. |
-| `test-unit/server/*.test.js` | Validators, security/rate-limit, admin HTTP (**supertest**), **ws integration**, SQLite persistence. |
-| `test-unit/client/*.test.js` | Client renderers/helpers in happy-dom (camera, mine, roads, net, vehicle). |
+| `test/unit/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock, docking, dodge), parking layout & resize, shovel spacing & relocation, rich-vein dozer prep, a full **haul-cycle integration** run. |
+| `test/unit/game/mine.test.js` | Mine generation, ore deposits, rich veins (deterministic via seed). |
+| `test/unit/game/admin.test.js` | Auth, session snapshots, **password persistence** across restarts. |
+| `test/unit/server/*.test.js` | Validators, security/rate-limit, admin HTTP (**supertest**), **ws integration**, SQLite persistence. |
+| `test/unit/client/*.test.js` | Client renderers/helpers in happy-dom (camera, mine, roads, net, vehicle). |
 
 Coverage uses the **istanbul** provider (it merges a CJS module loaded by several
 test files correctly, which v8 under-counts). The authoritative `game/` logic is
 held to a high bar; the canvas renderers are covered by the visual tests instead.
 
-**Visual** ([`test-visual/`](test-visual)) — Playwright screenshot-regression of
+**Visual** ([`test/visual/`](test/visual)) — Playwright screenshot-regression of
 the canvas renderers (dozer, vein mesh, road markings) against committed
 baselines. `npm run test:visual:update` regenerates them after an intended change.
 
-**Load** ([`test-load/`](test-load)) — a standalone WebSocket client that ramps
+**Load** ([`test/load/`](test/load)) — a standalone WebSocket client that ramps
 parallel rooms/players to find the server's capacity (set `TEST_MODE=1` to lift
 the per-IP caps).
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseOrigins, verifyOrigin, clientIp } from '../../server/security.js';
-import { RateLimiter } from '../../server/rate-limit.js';
+import { parseOrigins, verifyOrigin, clientIp } from '../../../server/security.js';
+import { RateLimiter } from '../../../server/rate-limit.js';
 
 const reqWith = (headers) => ({ req: { headers } });
 

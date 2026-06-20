@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import { createServer } from '../../server/app.js';
+import { createServer } from '../../../server/app.js';
 
 const PASS = 'secret';
 const AUTH = 'Basic ' + Buffer.from(`admin:${PASS}`).toString('base64');

@@ -8,7 +8,7 @@ const fixtures = ['dozer', 'vein-mesh', 'roads'];
 
 for (const name of fixtures) {
   test(`renders ${name}`, async ({ page }) => {
-    await page.goto(`/test-visual/fixtures/${name}.html`);
+    await page.goto(`/test/visual/fixtures/${name}.html`);
     await page.waitForFunction(() => window.__ready === true, { timeout: 5000 });
     // Ensure the canvas has actually painted (two rAFs) before screenshotting.
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));

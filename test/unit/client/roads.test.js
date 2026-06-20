@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Roads } from '../../public/components/roads.js';
+import { Roads } from '../../../public/components/roads.js';
 import { fakeCanvas } from './_helpers.js';
 
 const grid = { zoneW: 10, zoneH: 10, zoneCols: 40, zoneRows: 40 };

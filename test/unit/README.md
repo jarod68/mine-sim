@@ -20,5 +20,5 @@ npm run coverage      # with istanbul coverage + thresholds
 - Generation is RNG-seedable: `new World(seed)` / `generateMine(cols, rows, seed)`
   for deterministic maps. Prefer the spawn keep-out (blocks x≤46, y≤26) for
   coordinates that must never land on a random vein.
-- Config: [`../vitest.config.js`](../vitest.config.js) (include glob, coverage
+- Config: [`../../vitest.config.js`](../../vitest.config.js) (include glob, coverage
   thresholds — `game/**` is held to a high bar).

@@ -18,7 +18,7 @@ module.exports = [
 
   // Server + game logic + Node scripts (load test, screenshots): CommonJS on Node.
   {
-    files: ['server/**/*.js', 'game/**/*.js', 'scripts/**/*.js', 'test-load/**/*.js', 'server.js', 'admin.js'],
+    files: ['server/**/*.js', 'game/**/*.js', 'scripts/**/*.js', 'test/load/**/*.js', 'server.js', 'admin.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs', globals: { ...globals.node } },
     rules,
   },
@@ -32,7 +32,7 @@ module.exports = [
 
   // Unit tests: ES modules, Node + browser (happy-dom) globals.
   {
-    files: ['test-unit/**/*.js'],
+    files: ['test/unit/**/*.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: { ...globals.node, ...globals.browser } },
     rules: { ...rules, 'no-unused-vars': 'off' },
   },
@@ -40,7 +40,7 @@ module.exports = [
   // Visual tests (Playwright): ES modules on Node, with browser globals available
   // inside page.evaluate callbacks.
   {
-    files: ['test-visual/**/*.js'],
+    files: ['test/visual/**/*.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: { ...globals.node, ...globals.browser } },
     rules: { ...rules, 'no-unused-vars': 'off' },
   },

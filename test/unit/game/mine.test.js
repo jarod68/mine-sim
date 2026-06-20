@@ -7,7 +7,7 @@ import {
   PREP_PASSES,
   VEIN_AREA,
   VEIN_COUNT,
-} from '../../game/mine.js';
+} from '../../../game/mine.js';
 
 describe('mine constants', () => {
   it('block tonnage is 10 000 t', () => {
