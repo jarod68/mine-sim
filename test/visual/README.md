@@ -11,6 +11,16 @@ npm run test:visual:update    # regenerate baselines after an intended change
 
 First run needs the browser once: `npx playwright install chromium`.
 
+## Fixtures
+- `dozer` / `assets` — vehicle sprites (the dozer; one of every catalog asset type).
+- `vein-mesh` — the rich-vein elevation mesh + a revealed ore block.
+- `roads` — one-way lane markings, divided lanes, a junction.
+- `parking-crusher` — a parking pad + crusher building linked by road.
+- `seed-map` — the default map's **vein layout** for a fixed seed. The spec
+  generates it in Node (`generateMine(…, seed)`) and injects the significant
+  blocks into the page via `addInitScript`. Roads / crushers / fleet use unseeded
+  `Math.random`, so they're left out to keep the baseline stable.
+
 ## How it works
 - [`serve.cjs`](serve.cjs) — a tiny static server rooted at the project, started
   by [`../../playwright.config.js`](../../playwright.config.js) as its `webServer`, so
