@@ -7,12 +7,8 @@
 
 const ORE_TYPES = ['iron', 'copper', 'gold', 'carbon'];
 
-const ORE_LABELS = {
-  iron:   'Iron',
-  copper: 'Copper',
-  gold:   'Gold',
-  carbon: 'Carbon',
-};
+// Human labels are presentation-only and live on the client (public/components/
+// mine.js) — the server never sends them, so it doesn't carry a copy.
 
 const BLOCK_TONNAGE = 10000;
 
@@ -40,7 +36,21 @@ const PREP_PASSES = 10;       // dozer passes needed to reveal each block
 // Rich veins skew toward valuable ore.
 const PREP_ORE_WEIGHTED = ['gold', 'gold', 'copper', 'copper', 'carbon', 'iron'];
 
-const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+// Pluggable RNG so generation can be made deterministic (seeded) in tests. All
+// helpers below draw from `rng`; generateMine sets it for the duration of a build.
+let rng = Math.random;
+const randInt = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+
+// Small deterministic PRNG (mulberry32) used when a seed is supplied.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 function emptyBlock(x, y) {
   return {
@@ -184,26 +194,33 @@ function rebuildPrepZones(blocks) {
   return zones;
 }
 
-function generateMine(cols, rows) {
-  const blocks = [];
-  for (let y = 0; y < rows; y++) {
-    const row = [];
-    for (let x = 0; x < cols; x++) row.push(emptyBlock(x, y));
-    blocks.push(row);
+// `seed` (optional) makes the whole layout deterministic — pass it from tests for
+// reproducible maps; omit it in production for a fresh map every game.
+function generateMine(cols, rows, seed) {
+  const prev = rng;
+  if (seed != null) rng = mulberry32(seed);
+  try {
+    const blocks = [];
+    for (let y = 0; y < rows; y++) {
+      const row = [];
+      for (let x = 0; x < cols; x++) row.push(emptyBlock(x, y));
+      blocks.push(row);
+    }
+    const mine = { cols, rows, blocks };
+
+    const target = Math.floor(cols * rows * ORE_COVERAGE);
+    let oreCells = 0;
+    let guard = 0;
+    while (oreCells < target && guard++ < 1200) {
+      const ore = ORE_WEIGHTED[randInt(0, ORE_WEIGHTED.length - 1)];
+      oreCells += growDeposit(mine, ore, randInt(6, 16));
+    }
+
+    placePrepZones(mine);
+    return mine;
+  } finally {
+    rng = prev;
   }
-  const mine = { cols, rows, blocks };
-
-  const target = Math.floor(cols * rows * ORE_COVERAGE);
-  let oreCells = 0;
-  let guard = 0;
-  while (oreCells < target && guard++ < 1200) {
-    const ore = ORE_WEIGHTED[randInt(0, ORE_WEIGHTED.length - 1)];
-    oreCells += growDeposit(mine, ore, randInt(6, 16));
-  }
-
-  placePrepZones(mine);
-
-  return mine;
 }
 
 module.exports = {
@@ -212,7 +229,6 @@ module.exports = {
   setOre,
   BLOCK_TONNAGE,
   ORE_TYPES,
-  ORE_LABELS,
   PREP_PASSES,
   PREP_ZONE_AREA,
   PREP_ZONE_COUNT,

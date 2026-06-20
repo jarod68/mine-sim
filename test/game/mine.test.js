@@ -4,7 +4,6 @@ import {
   rebuildPrepZones,
   BLOCK_TONNAGE,
   ORE_TYPES,
-  ORE_LABELS,
   PREP_PASSES,
   PREP_ZONE_AREA,
   PREP_ZONE_COUNT,
@@ -15,9 +14,8 @@ describe('mine constants', () => {
     expect(BLOCK_TONNAGE).toBe(10000);
   });
 
-  it('every ore type has a human label', () => {
+  it('exposes the ore types (human labels live client-side)', () => {
     expect(ORE_TYPES).toEqual(['iron', 'copper', 'gold', 'carbon']);
-    for (const ore of ORE_TYPES) expect(typeof ORE_LABELS[ore]).toBe('string');
   });
 });
 
@@ -81,7 +79,14 @@ describe('generateMine', () => {
 });
 
 describe('rich prep veins', () => {
-  const mine = generateMine(190, 139);   // full-size map: room for every zone
+  const mine = generateMine(190, 139, 12345);   // seeded → deterministic full-size map
+
+  it('is deterministic for a given seed', () => {
+    const a = generateMine(190, 139, 7);
+    const b = generateMine(190, 139, 7);
+    expect(JSON.stringify(a.prepZones)).toBe(JSON.stringify(b.prepZones));
+    expect(JSON.stringify(generateMine(190, 139, 8).prepZones)).not.toBe(JSON.stringify(a.prepZones));
+  });
 
   // index every prep block by its zone id
   function zoneBlocks() {
