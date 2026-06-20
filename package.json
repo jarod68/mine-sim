@@ -8,6 +8,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots",
+    "test:load": "node test-load/loadtest.js",
     "coverage": "vitest run --coverage",
     "prebuild": "npm run coverage",
     "build": "docker buildx create --name minesim-builder --driver docker-container --bootstrap --use 2>/dev/null || true && docker buildx build --builder minesim-builder --platform linux/amd64,linux/arm64 -t jarod68/mine-sim:latest --push .",
@@ -19,6 +22,7 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@vitest/coverage-istanbul": "^4.1.9",
     "eslint": "^9.39.4",
     "globals": "^17.6.0",

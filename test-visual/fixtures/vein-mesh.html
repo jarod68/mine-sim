@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;background:#0c0f0d}canvas{display:block}
+</style></head><body>
+<canvas id="c"></canvas>
+<script type="module">
+  import { GameCanvas } from '/public/components/game-canvas.js';
+  import { camera } from '/public/components/camera.js';
+
+  const cols = 18, rows = 20, view = { w: 7942, h: 5560 };
+  const blocks = [];
+  for (let y = 0; y < rows; y++) {
+    const row = [];
+    for (let x = 0; x < cols; x++) row.push({ x, y, explored: false, ore: null, oreRemaining: 0 });
+    blocks.push(row);
+  }
+  // an irregular vein (rough blob) with a radial preparation gradient
+  const cxb = 8, cyb = 10, R = 6.2;
+  for (let y = 0; y < rows; y++)
+    for (let x = 0; x < cols; x++) {
+      const d = Math.hypot(x - cxb, (y - cyb) * 0.9) + (Math.sin(x * 1.3) + Math.cos(y * 1.1)) * 0.6;
+      if (d <= R) { const b = blocks[y][x]; b.prep = true; b.prepMax = 10; b.prepPasses = Math.max(0, Math.min(10, Math.round((d / R) * 8))); }
+    }
+  for (let y = 8; y <= 11; y++) Object.assign(blocks[y][16], { explored: true, ore: 'gold', orePct: 55, dirtPct: 45, oreRemaining: 5500, dirtRemaining: 4500 });
+
+  camera.scale = 0.083; camera.ox = 6; camera.oy = 6;
+  const gc = new GameCanvas(document.getElementById('c'), { cols, rows, view, blocks }, () => {});
+  gc.resize(760, 560);
+  window.__ready = true;
+</script>
+</body></html>

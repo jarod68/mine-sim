@@ -1,6 +1,12 @@
 # Test coverage output
 coverage/
 
+# Playwright visual-test artifacts (baselines under test-visual/ ARE committed)
+test-results/
+playwright-report/
+test-visual/**/*-actual.png
+test-visual/**/*-diff.png
+
 # Dependencies (recommended — see note below)
 node_modules/
 

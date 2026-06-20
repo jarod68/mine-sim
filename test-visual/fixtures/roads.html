@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;background:#1a140d}canvas{display:block}
+</style></head><body>
+<canvas id="c"></canvas>
+<script type="module">
+  import { Roads } from '/public/components/roads.js';
+  import { camera } from '/public/components/camera.js';
+
+  const view = { w: 800, h: 600 };
+  const grid = { zoneCols: 40, zoneRows: 30, zoneW: 20, zoneH: 20 };
+  const roads = new Roads(document.getElementById('c'), view, grid);
+
+  const cells = [];
+  for (let gx = 5; gx <= 24; gx++) cells.push({ gx, gy: 12, dir: { dx: 1, dy: 0 } });   // east
+  for (let gx = 5; gx <= 24; gx++) cells.push({ gx, gy: 13, dir: { dx: -1, dy: 0 } });  // west (divided)
+  for (let gy = 6; gy <= 18; gy++) cells.push({ gx: 14, gy, dir: { dx: 0, dy: 1 } });   // south (junction)
+  roads.load(cells);
+
+  camera.scale = 1.5; camera.ox = -60; camera.oy = -120;
+  roads.resize(760, 560);   // triggers render
+  window.__ready = true;
+</script>
+</body></html>

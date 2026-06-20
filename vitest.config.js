@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['test/**/*.test.js'],
+    include: ['test-unit/**/*.test.js'],
     coverage: {
       // istanbul (not v8): instruments at transform time and merges coverage
       // correctly for a CJS module loaded by several test files — v8 under-counts
