@@ -9,9 +9,8 @@ import { applyCamera, toWorld, visibleRect, camera, DPR } from './camera.js';
 // hatching are sub-pixel noise — skip them and draw flat colour fills only.
 const DETAIL_PX = 9;
 
-// World coordinate space — must match the server (game/world.js).
-export const VIEW_W = 7942;
-export const VIEW_H = 5560;
+// World coordinate space comes from the server (state.view) — never hard-coded
+// here, so client and server can't drift.
 
 // Deterministic 2D hash → [0,1). Used to jitter/height the elevation-mesh vertices
 // from their GLOBAL grid coordinates so the mesh tiles seamlessly across blocks.
@@ -29,8 +28,8 @@ export class GameCanvas {
     this.onBlockClick = onBlockClick;
     this.dpr = DPR;
 
-    this.bw = VIEW_W / mine.cols;
-    this.bh = VIEW_H / mine.rows;
+    this.bw = mine.view.w / mine.cols;
+    this.bh = mine.view.h / mine.rows;
 
     canvas.addEventListener('click', (e) => this._handleClick(e));
   }
@@ -48,8 +47,8 @@ export class GameCanvas {
 
   setMine(mine) {
     this.mine = mine;
-    this.bw = VIEW_W / mine.cols;
-    this.bh = VIEW_H / mine.rows;
+    this.bw = mine.view.w / mine.cols;
+    this.bh = mine.view.h / mine.rows;
     this.render();
   }
 

@@ -1,7 +1,7 @@
 // Thin client: renders authoritative server snapshots and sends commands over a
 // single WebSocket (no HTTP polling). The server owns the entire simulation.
 
-import { GameCanvas, VIEW_W, VIEW_H } from './components/game-canvas.js';
+import { GameCanvas } from './components/game-canvas.js';
 import { BlockPopup } from './components/block-popup.js';
 import { Fleet } from './components/vehicle.js';
 import { Roads } from './components/roads.js';
@@ -29,6 +29,7 @@ let maxAssets = 150;
 let crusherPrice = 1000000;
 let extraCrushers = 0;
 let maxExtraCrushers = 5;
+let viewW = 0, viewH = 0;    // world-space dims, from the server's state.view
 let grid = null;             // sub-zone grid metrics (set in build)
 let parkRect = null;         // current parking pad rect (sub-zones)
 let selectedBlock = null;    // last clicked block (target of the "X" drill shortcut)
@@ -170,15 +171,16 @@ function build(state) {
   if (typeof state.extraCrushers === 'number') extraCrushers = state.extraCrushers;
   if (state.maxExtraCrushers) maxExtraCrushers = state.maxExtraCrushers;
   setCredit(state.credit);
+  viewW = state.view.w; viewH = state.view.h;
   game = new GameCanvas(canvas, state, onBlockClick);
-  blockW = VIEW_W / state.cols;
-  blockH = VIEW_H / state.rows;
+  blockW = viewW / state.cols;
+  blockH = viewH / state.rows;
 
   const zoneCols = state.cols * 2;
   const zoneRows = state.rows * 2;
-  grid = { zoneCols, zoneRows, zoneW: VIEW_W / zoneCols, zoneH: VIEW_H / zoneRows };
+  grid = { zoneCols, zoneRows, zoneW: viewW / zoneCols, zoneH: viewH / zoneRows };
 
-  roads = new Roads(document.getElementById('roads-layer'), { w: VIEW_W, h: VIEW_H }, grid);
+  roads = new Roads(document.getElementById('roads-layer'), { w: viewW, h: viewH }, grid);
   parkRect = { ...state.parking };
   roads.addParking(parkRect.x, parkRect.y, parkRect.w, parkRect.h);
   roads.setCrushers(state.crushers);
@@ -192,7 +194,7 @@ function build(state) {
   roads.onRender = invalidateRoads;   // coalesce edit/pan redraws into the shared frame
   roads.onPan = () => { invalidateAll(); updateParkOverlay(); };   // edge auto-pan → redraw all
 
-  fleet = new Fleet(document.getElementById('vehicle-layer'), { w: VIEW_W, h: VIEW_H }, grid);
+  fleet = new Fleet(document.getElementById('vehicle-layer'), { w: viewW, h: viewH }, grid);
   fleet.onControl = (label, cmd) => net.control(label, cmd);
   fleet.onSelect = (v) => { syncSelection(v); renderAsset(v); };
   fleet.sync(state.vehicles);
@@ -389,12 +391,12 @@ function setupCamera() {
     roads.resize(w, h);
     fleet.resize(w, h);
   };
-  const minScale = () => Math.min(stage.clientWidth / VIEW_W, stage.clientHeight / VIEW_H) * 0.5;
+  const minScale = () => Math.min(stage.clientWidth / viewW, stage.clientHeight / viewH) * 0.5;
   const fit = () => {
-    const s = Math.min(stage.clientWidth / VIEW_W, stage.clientHeight / VIEW_H);
+    const s = Math.min(stage.clientWidth / viewW, stage.clientHeight / viewH);
     camera.scale = s;
-    camera.ox = (stage.clientWidth - VIEW_W * s) / 2;
-    camera.oy = (stage.clientHeight - VIEW_H * s) / 2;
+    camera.ox = (stage.clientWidth - viewW * s) / 2;
+    camera.oy = (stage.clientHeight - viewH * s) / 2;
     rerender();
   };
 
@@ -440,7 +442,7 @@ function renderAsset(v) {
   }
 
   const item = (label, val) => `<span class="ai"><i>${label}</i><b>${val}</b></span>`;
-  let parts = [item('Model', v.model), item('Name', v.label)];
+  const parts = [item('Model', v.model), item('Name', v.label)];
 
   if (v.type === 'oht') {
     const shovels = fleet.vehicles.filter((x) => x.type === 'excavator');
