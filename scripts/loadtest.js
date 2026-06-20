@@ -116,7 +116,7 @@ function spawnGame() {
 // ── ramp + reporting ──
 console.log(`load test → ${URL}  (${PLAYERS} players/game, +1 game every ${ADD_EVERY}ms, up to ${MAX_GAMES})`);
 console.log('time   games  sockets  players  in/s   drill p50/p95   sent/ack   errs');
-let inPrev = 0, t0 = Date.now();
+let inPrev = 0; const t0 = Date.now();
 const printer = setInterval(() => {
   const dt = PRINT_MS / 1000;
   const inRate = Math.round((m.msgsIn - inPrev) / dt); inPrev = m.msgsIn;
