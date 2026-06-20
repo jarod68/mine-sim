@@ -471,11 +471,35 @@ function drawDozer(ctx, L, W, modelTag = null) {
   ctx.fillStyle = '#c7ccd2';
   ctx.beginPath(); ctx.roundRect(L * 0.40, -W * 0.10, L * 0.08, W * 0.20, 1); ctx.fill();
 
-  // blade — wide, very thin steel edge at the very front
+  // blade — wide, very thin steel edge at the very front. Slight U-blade: the
+  // central run is straight, but the outer ~5% at each end sweep forward (+x,
+  // toward the vehicle's nose), like a real dozer's U-blade wings.
+  const bbx = L * 0.46;              // back face of the blade
+  const bfx = L * 0.515;            // front (leading) face
+  const bExt = W * 0.58;            // half-span across the vehicle
+  const bKnee = W * 0.522;          // bend starts here → only the outer ~5% curls forward
+  const bFwd = L * 0.045;           // how far the wing tips sweep forward
+  const frontFace = () => {         // leading edge, top tip → straight run → bottom tip
+    ctx.moveTo(bfx + bFwd, -bExt);
+    ctx.quadraticCurveTo(bfx, -bExt, bfx, -bKnee);
+    ctx.lineTo(bfx, bKnee);
+    ctx.quadraticCurveTo(bfx, bExt, bfx + bFwd, bExt);
+  };
   ctx.fillStyle = '#dadfe5';
-  ctx.beginPath(); ctx.roundRect(L * 0.46, -W * 0.58, L * 0.055, W * 1.16, 1.5); ctx.fill();
-  ctx.fillStyle = '#aeb4bc';
-  ctx.fillRect(L * 0.505, -W * 0.58, L * 0.012, W * 1.16);
+  ctx.beginPath();
+  frontFace();
+  ctx.lineTo(bbx + bFwd, bExt);                            // bottom wing cap
+  ctx.quadraticCurveTo(bbx, bExt, bbx, bKnee);             // back face up
+  ctx.lineTo(bbx, -bKnee);
+  ctx.quadraticCurveTo(bbx, -bExt, bbx + bFwd, -bExt);     // top wing cap
+  ctx.closePath();
+  ctx.fill();
+  // darker cutting edge tracing the U-shaped leading face
+  ctx.strokeStyle = '#aeb4bc';
+  ctx.lineWidth = Math.max(1, L * 0.014);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath(); frontFace(); ctx.stroke();
+  ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
 
   // model tag on the engine deck, turned 90° and sitting on its own white pad so
   // nothing (e.g. the louvers) shows through behind it.
