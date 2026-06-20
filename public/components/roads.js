@@ -23,6 +23,7 @@ export class Roads {
     this.onChange = null;        // called after edits (persist to server)
     this.onRender = null;        // set by the host to coalesce redraws into one rAF
     this.onPan = null;           // set by the host to redraw all layers when we auto-pan
+    this.isVeinBlocked = null;   // (gx,gy) → true if on an un-prepared dozer vein (no road)
 
     // Edge auto-pan: while drawing toward a screen edge, scroll the view that way.
     this._panVX = 0; this._panVY = 0;
@@ -153,6 +154,9 @@ export class Roads {
     return this.cells.get(k);
   }
 
+  // No road may be drawn on an un-prepared dozer vein (the server rejects it too).
+  _blocked(gx, gy) { return !!(this.isVeinBlocked && this.isVeinBlocked(gx, gy)); }
+
   _cellAt(e) { return this._cellAtClient(e.clientX, e.clientY); }
 
   _cellAtClient(clientX, clientY) {
@@ -210,7 +214,7 @@ export class Roads {
     this.drawing = true;
     this.drawAxis = null;         // axis locks in on the first deliberate movement
     this.last = this._cellAt(e);
-    if (this.tool === 'draw') this._ensure(this.last.gx, this.last.gy);
+    if (this.tool === 'draw') { if (!this._blocked(this.last.gx, this.last.gy)) this._ensure(this.last.gx, this.last.gy); }
     else this._eraseAt(this.last.gx, this.last.gy);
     this._invalidate();
   }
@@ -271,12 +275,12 @@ export class Roads {
     if (dx === 0 && dy === 0) return;
     let guard = 0;
     while ((gx !== t.gx || gy !== t.gy) && guard++ < 1000) {
-      if (mode === 'draw') this._ensure(gx, gy).dir = { dx, dy };
+      if (mode === 'draw' && !this._blocked(gx, gy)) this._ensure(gx, gy).dir = { dx, dy };
       gx += dx;
       gy += dy;
-      if (mode === 'draw') this._ensure(gx, gy); else this._eraseAt(gx, gy);
+      if (mode === 'draw') { if (!this._blocked(gx, gy)) this._ensure(gx, gy); } else this._eraseAt(gx, gy);
     }
-    if (mode === 'draw') this._ensure(gx, gy).dir = { dx, dy }; // endpoint keeps a flow
+    if (mode === 'draw' && !this._blocked(gx, gy)) this._ensure(gx, gy).dir = { dx, dy }; // endpoint keeps a flow
   }
 
   // Two flow directions are exact opposites (e.g. east vs west).

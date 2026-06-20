@@ -42,6 +42,7 @@ export class Vehicle {
     this.digging = d.digging;
     this.manual = d.manual;
     this.shovel = d.shovel;
+    this.prepLine = d.prepLine ?? null;   // dozer sweep line "y,x0,x1,dir" or null
   }
 
   // Update from a full server snapshot: dynamic state now, position as a target.
@@ -64,6 +65,7 @@ export class Vehicle {
     if ('digging' in d) this.digging = d.digging;
     if ('manual' in d) this.manual = d.manual;
     if ('shovel' in d) this.shovel = d.shovel;
+    if ('prepLine' in d) this.prepLine = d.prepLine;
   }
 
   lerp(k) {
@@ -274,6 +276,7 @@ export class Fleet {
 
     this._drawDebug(ctx);
     this._drawMoveMarkers(ctx);
+    this._drawPrepLines(ctx);
 
     // Cull vehicles outside the viewport (cheap when zoomed in). The lerp still
     // runs for everyone so positions stay correct when they scroll back in.
@@ -288,6 +291,48 @@ export class Fleet {
     }
 
     requestAnimationFrame(this._loop);
+  }
+
+  // Fluo-violet path line over the block-row a dozer is currently working, with a
+  // U-turn "return" arrow at the end it's heading toward (it sweeps back & forth).
+  _drawPrepLines(ctx) {
+    const zW = this.grid?.zoneW, zH = this.grid?.zoneH;
+    if (!zW) return;
+    for (const v of this.vehicles) {
+      if (v.type !== 'dozer' || !v.prepLine) continue;
+      const p = v.prepLine.split(',');
+      const y = +p[0], x0 = +p[1], x1 = +p[2], dir = +p[3];
+      if (!Number.isFinite(y)) continue;
+      const cy = (2 * y + 1) * zH;
+      const cx0 = (2 * x0 + 1) * zW, cx1 = (2 * x1 + 1) * zW;
+      const out = dir > 0 ? 1 : -1;
+      const endX = out > 0 ? cx1 : cx0;
+      const r = zH * 0.9;
+      ctx.save();
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(206, 92, 255, 0.95)';      // fluo violet
+      ctx.shadowColor = 'rgba(198, 80, 255, 0.95)';      // neon glow
+      ctx.shadowBlur = zH * 0.6;
+      ctx.lineWidth = Math.max(0.5, zH * 0.078);         // 70% thinner
+      ctx.beginPath(); ctx.moveTo(cx0, cy); ctx.lineTo(cx1, cy); ctx.stroke();   // the swept row
+      // U-turn back under the line, ending in a short horizontal stub so the arrow-
+      // head sits on the stub and never crosses the return curve.
+      const stubX = endX - out * r * 0.15, stubY = cy + r;
+      const tipX = stubX - out * r * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(endX, cy);
+      ctx.quadraticCurveTo(endX + out * r * 1.25, cy + r * 0.55, stubX, stubY);
+      ctx.lineTo(tipX, stubY);
+      ctx.stroke();
+      // arrowhead at the stub tip, pointing back along the row (barbs lie on the stub)
+      const ah = zH * 0.4;
+      ctx.beginPath();
+      ctx.moveTo(tipX + out * ah, stubY - ah * 0.62);
+      ctx.lineTo(tipX, stubY);
+      ctx.lineTo(tipX + out * ah, stubY + ah * 0.62);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // Flag a move-to destination (world coords) for a vehicle, drawn until it

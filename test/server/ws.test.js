@@ -59,9 +59,10 @@ describe('WS — integration', () => {
     const c = collect(ws);
     ws.on('open', () => ws.send(JSON.stringify({ t: 'create' })));
     await c.wait('joined');
-    ws.send(JSON.stringify({ t: 'drill', x: 50, y: 50 }));
+    // (10,10) sits in the spawn keep-out, so it's never a (un-drillable) prep vein.
+    ws.send(JSON.stringify({ t: 'drill', x: 10, y: 10 }));
     const d = await c.wait('drilled');
-    expect(d.x).toBe(50);
+    expect(d.x).toBe(10);
     expect(d.block && d.block.explored).toBe(true);
     ws.close();
   });

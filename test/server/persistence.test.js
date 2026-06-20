@@ -19,7 +19,7 @@ describe('persistence (SQLite)', () => {
     const code = inst.rooms.createRoom().code;
     const w = inst.rooms.get(code).world;
     w.credit = 2000000;
-    w.drill(50, 40);
+    w.drill(42, 20);                                  // keep-out → never a prep vein
     w.buyAsset('PR776');
     const expectedCredit = w.credit;
     const expectedVehicles = w.vehicles.length;
@@ -31,7 +31,7 @@ describe('persistence (SQLite)', () => {
     expect(r2.world.credit).toBe(expectedCredit);
     expect(r2.world.vehicles.length).toBe(expectedVehicles);
     expect(r2.world.vehicles.some((v) => v.type === 'dozer')).toBe(true);
-    expect(r2.world.mine.blocks[40][50].explored).toBe(true);          // drilled block kept
+    expect(r2.world.mine.blocks[20][42].explored).toBe(true);          // drilled block kept
     expect(inst.rooms.eventLog.some((e) => e.type === 'create' && e.code === code)).toBe(true);
     // the restored world keeps simulating
     expect(() => { for (let i = 0; i < 60; i++) r2.world.tick(1 / 30); }).not.toThrow();

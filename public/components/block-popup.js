@@ -30,7 +30,7 @@ export class BlockPopup {
 
     this.el.innerHTML = block.explored
       ? this._exploredHtml(block)
-      : this._unexploredHtml(block);
+      : (block.prep ? this._prepHtml(block) : this._unexploredHtml(block));
 
     this.el.querySelector('.close').addEventListener('click', () => this.hide());
 
@@ -65,6 +65,22 @@ export class BlockPopup {
       <div class="unknown">Composition unknown</div>
       ${note}
       <button class="drill">⛏ Drill &amp; Explore${cost}</button>
+    `;
+  }
+
+  _prepHtml(block) {
+    const max = block.prepMax || 10;
+    const passes = Math.min(max, block.prepPasses || 0);
+    const pct = Math.round((passes / max) * 100);
+    return `
+      <header>
+        <span>Block (${block.x}, ${block.y})</span>
+        <button class="close" aria-label="Close">×</button>
+      </header>
+      <div class="unknown">Rich ore vein — drilling won't work here</div>
+      <div class="note">Send a dozer over it to prepare the ground.</div>
+      <div class="bar"><div class="seg" style="width:${pct}%;background:${COLORS.copper}"></div></div>
+      <div class="total">Preparation: ${passes} / ${max} passes</div>
     `;
   }
 

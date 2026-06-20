@@ -184,6 +184,11 @@ function build(state) {
   roads.setCrushers(state.crushers);
   if (state.roads) roads.load(state.roads);
   roads.onChange = scheduleRoadsSave;
+  // Block road drawing over an un-prepared dozer vein (server enforces it too).
+  roads.isVeinBlocked = (gx, gy) => {
+    const b = game.mine.blocks[Math.floor(gy / 2)]?.[Math.floor(gx / 2)];
+    return !!(b && b.prep && !b.explored);
+  };
   roads.onRender = invalidateRoads;   // coalesce edit/pan redraws into the shared frame
   roads.onPan = () => { invalidateAll(); updateParkOverlay(); };   // edge auto-pan → redraw all
 

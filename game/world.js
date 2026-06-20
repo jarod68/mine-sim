@@ -3,7 +3,7 @@
 // relocation, loading/unloading, payouts. The client only renders snapshots and
 // sends commands (drill, edit roads, drive manually, assign, reset).
 
-const { generateMine, setOre, BLOCK_TONNAGE } = require('./mine');
+const { generateMine, rebuildPrepZones, setOre, BLOCK_TONNAGE } = require('./mine');
 
 // View space shared with the client renderer (so x/y come ready to draw).
 // Map area ×15 of the original (×5 of the previous), view scaled to keep the
@@ -18,6 +18,9 @@ const BLOCKS_PER_CRUSHER = 5000;
 
 const STARTING_CREDIT = 100000;
 const DRILL_COST = 5000;
+
+// A dozer auto-starts preparing a rich vein when idle within this many blocks of it.
+const DOZER_PREP_RANGE = 5;
 
 const ORE_VALUE = {
   iron:   10000 / 240,
@@ -1363,6 +1366,8 @@ class World {
 
     // Per-vehicle "move to point" orders (vehicle → { gx, gy, path, i, stuck }).
     this._moveTo = new Map();
+    // Dozers actively preparing a rich vein (vehicle → { zoneId, dir, lastBlock }).
+    this._dozerPrep = new Map();
     this._boughtCrushers = 0;   // extra crushers the player has purchased
 
 
@@ -1428,6 +1433,7 @@ class World {
     this._boughtCrushers = snap.boughtCrushers || 0;
     this.dirty = new Map();
     this.mine = { cols: COLS, rows: ROWS, blocks: snap.blocks };
+    this.mine.prepZones = rebuildPrepZones(snap.blocks);   // derived from the per-block prep fields
     this.crushers = snap.crushers || [];
 
     this.roads = new Roads(this.grid);
@@ -1461,6 +1467,7 @@ class World {
     this.autopilot.setEnabled(true);
 
     this._moveTo = new Map();
+    this._dozerPrep = new Map();
     for (const [lbl, t] of snap.moveTo || []) this.moveTo(lbl, t.gx, t.gy);
 
     this._lastVeh = new Map();
@@ -1563,12 +1570,14 @@ class World {
       return !s || s.size === 0 || (s.size === 1 && s.has(self));
     };
     this.autopilot.isFree = isFree;
+    this._updateDozers();                           // auto-start + tally dozer prep passes
     this.autopilot.update(dt);
     for (const v of this.vehicles) {
       let dir = null;
       const mv = this._moveStep(v);                 // "move to point" override
       if (mv !== undefined) dir = mv;
       else if (v.manual && v.manualDir) dir = v.manualDir;
+      else if (this._dozerPrep.has(v)) dir = this._dozerStep(v);   // preparing a rich vein
       else if (this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
       const oldKeys = this._occKeys(v);
       v.update(dt, dir, this.grid, isRoad, isFree);
@@ -1579,9 +1588,102 @@ class World {
   // True when anything is (or is about to start) moving — drives the loop's
   // adaptive tick rate (idle rooms tick far less often).
   anyMoving() {
-    if (this._moveTo.size > 0) return true;
+    if (this._moveTo.size > 0 || this._dozerPrep.size > 0) return true;
     for (const v of this.vehicles) if (v.moving) return true;
     return false;
+  }
+
+  // ── Dozer prep: reveal rich veins by repeated dozer passes ──────────────────
+  // Idle dozers within DOZER_PREP_RANGE blocks of an unfinished vein auto-start;
+  // a working dozer tallies one pass per block it enters and reveals a block once
+  // it reaches prepMax passes. _dozerStep drives the back-and-forth line sweep.
+  _updateDozers() {
+    const zones = this.mine.prepZones;
+    if (!zones || !zones.length) return;
+    for (const v of this.vehicles) {
+      if (v.type !== 'dozer') continue;
+      if (v.manual || this._moveTo.has(v)) { this._dozerPrep.delete(v); v._prepLine = null; continue; }
+      const bx = Math.floor(v.gx / 2), by = Math.floor(v.gy / 2);
+      const st = this._dozerPrep.get(v);
+      if (st) {
+        const z = zones[st.zoneId];
+        if (!z || z.remaining <= 0) { this._dozerPrep.delete(v); v._prepLine = null; continue; }
+        const k = `${bx},${by}`;
+        if (k !== st.lastBlock) {                    // entered a new block → one pass
+          st.lastBlock = k;
+          const b = this.mine.blocks[by]?.[bx];
+          if (b && b.prep && !b.prepDone && b.prepZone === st.zoneId) {
+            b.prepPasses = Math.min(b.prepMax, b.prepPasses + 1);
+            if (b.prepPasses >= b.prepMax) this._revealPrep(b, z);
+            else this._markDirty(b);
+          }
+        }
+        continue;
+      }
+      const id = this._nearestPrepZone(bx, by, DOZER_PREP_RANGE);
+      if (id != null) this._dozerPrep.set(v, { zoneId: id, dir: 1, lastBlock: null });
+    }
+  }
+
+  _revealPrep(b, z) {
+    b.prepDone = true;
+    b.explored = true;                               // ore now visible & mineable
+    if (z) z.remaining = Math.max(0, z.remaining - 1);
+    this._markDirty(b);
+  }
+
+  // Zone of the nearest un-revealed vein BLOCK within R blocks (Chebyshev), or
+  // null. Scans actual blocks — not bounding boxes — so an irregular zone's empty
+  // bbox corners don't trigger (or mis-pick) a start.
+  _nearestPrepZone(bx, by, R) {
+    let best = null, bestD = Infinity;
+    for (let dy = -R; dy <= R; dy++)
+      for (let dx = -R; dx <= R; dx++) {
+        const b = this.mine.blocks[by + dy]?.[bx + dx];
+        if (!b || !b.prep || b.prepDone) continue;
+        const z = this.mine.prepZones[b.prepZone];
+        if (!z || z.remaining <= 0) continue;
+        const d = Math.max(Math.abs(dx), Math.abs(dy));
+        if (d < bestD) { bestD = d; best = b.prepZone; }
+      }
+    return best;
+  }
+
+  // One step of a dozer's vein sweep: reach the zone's columns, drop to the top
+  // unfinished block-row, then sweep back and forth across it (each traversal adds
+  // a pass to every block in the row) until the whole zone is revealed.
+  _dozerStep(v) {
+    const st = this._dozerPrep.get(v);
+    if (!st) return null;
+    const z = this.mine.prepZones[st.zoneId];
+    if (!z || z.remaining <= 0) return null;
+    const bx = Math.floor(v.gx / 2), by = Math.floor(v.gy / 2);
+    // Topmost block-row still hiding ore, AND that row's own unrevealed span — not
+    // the zone bounding box. A narrow row then turns around at its own last block
+    // instead of dragging out to the width of the widest row.
+    let row = -1, rowMin = Infinity, rowMax = -Infinity;
+    for (let ry = z.y0; ry <= z.y1 && row < 0; ry++) {
+      let mn = Infinity, mx = -Infinity;
+      for (let rx = z.x0; rx <= z.x1; rx++) {
+        const b = this.mine.blocks[ry][rx];
+        if (b && b.prep && b.prepZone === st.zoneId && !b.prepDone) { if (rx < mn) mn = rx; if (rx > mx) mx = rx; }
+      }
+      if (mn !== Infinity) { row = ry; rowMin = mn; rowMax = mx; }
+    }
+    if (row < 0) { v._prepLine = null; return null; }
+    v._prepLine = { y: row, x0: rowMin, x1: rowMax, dir: st.dir };   // for the client overlay
+    if (by !== row) {                                // approach the working row, in its span
+      if (bx < rowMin) return [1, 0];
+      if (bx > rowMax) return [-1, 0];
+      return [0, Math.sign(row - by)];
+    }
+    // Sweep THIS row only, overshooting one block past its own last blocks so every
+    // block (edges included) gets a pass in both directions (≈ prepMax/2 round trips).
+    let dir = st.dir;
+    if (dir > 0 && bx >= rowMax + 1) dir = -1;
+    else if (dir < 0 && bx <= rowMin - 1) dir = 1;
+    st.dir = dir;
+    return [dir, 0];
   }
 
   _buildOcc() {
@@ -1653,6 +1755,7 @@ class World {
       return { error: 'invalid coordinates', credit: this.credit };
     }
     const block = this.mine.blocks[y][x];
+    if (block.prep && !block.prepDone) return { error: 'requires dozer preparation', credit: this.credit };
     if (block.explored) return { block, credit: this.credit };
     if (this.credit < DRILL_COST) return { error: 'insufficient credit', credit: this.credit };
     this.credit -= DRILL_COST;
@@ -1661,8 +1764,18 @@ class World {
     return { block, credit: this.credit };
   }
 
+  // True when sub-zone cell (gx,gy) lies on a rich vein block the dozer hasn't
+  // revealed yet — no road may be laid there until it's prepared.
+  _onUnpreparedVein(gx, gy) {
+    const b = this.mine.blocks[Math.floor(gy / 2)]?.[Math.floor(gx / 2)];
+    return !!(b && b.prep && !b.explored);
+  }
+
   setRoads(cells) {
-    this.roads.setNetwork(cells);
+    // Drop any cell on an un-prepared rich vein — roads can't cross it until the
+    // dozer has revealed the ground. The serialized result echoes the drop back.
+    const filtered = Array.isArray(cells) ? cells.filter((c) => !this._onUnpreparedVein(c.gx, c.gy)) : cells;
+    this.roads.setNetwork(filtered);
     this.autopilot._bayCache = null;       // road change → recompute crusher bays
     this.autopilot._distCache.clear();     // …and every cached distance field
   }
@@ -1939,7 +2052,11 @@ class World {
   }
 
   // ── snapshots ──
-  _publicBlock(b) { return b.explored ? b : { x: b.x, y: b.y, explored: false }; }
+  _publicBlock(b) {
+    if (b.explored) return b;
+    if (b.prep) return { x: b.x, y: b.y, explored: false, prep: true, prepPasses: b.prepPasses, prepMax: b.prepMax };
+    return { x: b.x, y: b.y, explored: false };
+  }
 
   _vehicle(v) {
     return {
@@ -1949,6 +2066,7 @@ class World {
       load: v.load, loadOre: v.loadOre, payload: v.payload, bucket: v.bucket,
       task: v.task, digging: v.digging, manual: v.manual,
       shovel: v.type === 'oht' ? (this.autopilot.assignedShovel(v)?.label ?? null) : null,
+      prepLine: prepLineStr(v),
     };
   }
 
@@ -1986,6 +2104,7 @@ class World {
       digging: v.digging,
       manual: v.manual,
       shovel: v.type === 'oht' ? (this.autopilot.assignedShovel(v)?.label ?? null) : null,
+      prepLine: prepLineStr(v),
     };
   }
 
@@ -2040,6 +2159,13 @@ class World {
 }
 
 // Equality for delta fields — scalars by ===, the task object by its contents.
+// Compact, value-comparable encoding of a dozer's current sweep line for deltas
+// ("y,x0,x1,dir" or null) — the client draws the violet path + return arrow.
+function prepLineStr(v) {
+  const p = v._prepLine;
+  return p ? `${p.y},${p.x0},${p.x1},${p.dir}` : null;
+}
+
 function fieldEq(a, b) {
   if (a === b) return true;
   if (a && b && typeof a === 'object' && typeof b === 'object')

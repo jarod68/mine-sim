@@ -18,6 +18,7 @@ export const COLORS = {
   gold:       'rgba(240, 226, 96, 0.55)',   // yellow
   carbon:     'rgba(10, 10, 14, 0.88)',     // near-black
   unexplored: 'rgba(70, 110, 95, 0.14)',    // dim phosphor void
+  prep:       'rgba(48, 28, 12, 0.82)',     // dark brown — unprepared rich vein
 };
 
 // Solid (opaque) variants for legend swatches, so faint fills stay readable.

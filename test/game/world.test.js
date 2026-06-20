@@ -625,14 +625,14 @@ describe('World — collisions & live deltas', () => {
 
   it('round-trips the full world through toSnapshot / fromSnapshot', () => {
     const w = new World();
-    w.drill(60, 50);
+    w.drill(42, 20);                          // keep-out → never a prep vein
     w.credit = 333000;
     w.assign('OHT03', 'HEX01');               // change an autopilot link
     const snap = JSON.parse(JSON.stringify(w.toSnapshot()));   // survives JSON
     const w2 = World.fromSnapshot(snap);
     expect(w2.credit).toBe(333000);
     expect(w2.vehicles.length).toBe(w.vehicles.length);
-    expect(w2.mine.blocks[50][60].explored).toBe(true);
+    expect(w2.mine.blocks[20][42].explored).toBe(true);
     expect(w2.roads.serialize().length).toBe(w.roads.serialize().length);
     expect(w2.autopilot.assignedShovel(w2.byLabel.get('OHT03'))?.label).toBe('HEX01');
     expect(() => { for (let i = 0; i < 60; i++) w2.tick(1 / 30); }).not.toThrow();
@@ -640,16 +640,16 @@ describe('World — collisions & live deltas', () => {
 
   it('snapshotJson is a valid snapshot equal to toSnapshot (grid JSON cached)', () => {
     const w = new World();
-    w.drill(40, 30);
+    w.drill(40, 20);                               // keep-out → always drillable (never a prep vein)
     const fromJson = JSON.parse(w.snapshotJson());
     expect(fromJson.blocks.length).toBe(w.mine.blocks.length);
     expect(fromJson.credit).toBe(w.toSnapshot().credit);
     const w2 = World.fromSnapshot(fromJson);
-    expect(w2.mine.blocks[30][40].explored).toBe(true);
+    expect(w2.mine.blocks[20][40].explored).toBe(true);
     const cached = w._gridJson;
     w.snapshotJson();
     expect(w._gridJson).toBe(cached);              // reused (grid unchanged)
-    w.drill(41, 30);
+    w.drill(41, 20);
     w.snapshotJson();
     expect(w._gridJson).not.toBe(cached);          // regenerated after a drill
   });
@@ -970,5 +970,81 @@ describe('World — parking alignment & resize', () => {
     expect(r.x).toBe(0); expect(r.y).toBe(0);
     expect(r.w).toBeGreaterThanOrEqual(2);
     expect(r.h).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('rich prep veins (World)', () => {
+  // A dozer placed one block above zone 0, registered with the world.
+  function withDozer() {
+    const w = new World();
+    const z = w.mine.prepZones[0];
+    const g = w.grid;
+    let pb = null;                              // a real zone-0 block (bbox corner may be empty)
+    for (let y = z.y0; y <= z.y1 && !pb; y++)
+      for (let x = z.x0; x <= z.x1; x++) { const b = w.mine.blocks[y][x]; if (b.prep && b.prepZone === 0) { pb = b; break; } }
+    const dz = new Vehicle({ type: 'dozer', label: 'DZ01', gx: pb.x * 2, gy: pb.y * 2, len: g.zoneW * 0.9, wid: g.zoneH * 0.6 });
+    dz.place(g);
+    w.vehicles.push(dz); w.byLabel.set('DZ01', dz);
+    return { w, z, dz };
+  }
+
+  it('refuses to drill an un-prepared prep block', () => {
+    const w = new World();
+    const z = w.mine.prepZones[0];
+    let pb = null;                              // a real vein block (bbox corner may be empty)
+    for (let y = z.y0; y <= z.y1 && !pb; y++)
+      for (let x = z.x0; x <= z.x1; x++) { const b = w.mine.blocks[y][x]; if (b.prep) { pb = b; break; } }
+    const r = w.drill(pb.x, pb.y);
+    expect(r.error).toBe('requires dozer preparation');
+    expect(pb.explored).toBe(false);
+  });
+
+  it('still drills a normal (non-prep) block', () => {
+    const w = new World();
+    const r = w.drill(10, 10);                 // spawn keep-out → never a prep vein
+    expect(r.block.explored).toBe(true);
+  });
+
+  it('drops road cells laid on an un-prepared vein, allows them once revealed', () => {
+    const w = new World();
+    const z = w.mine.prepZones[0];
+    let pb = null;
+    for (let y = z.y0; y <= z.y1 && !pb; y++)
+      for (let x = z.x0; x <= z.x1; x++) { const b = w.mine.blocks[y][x]; if (b.prep) { pb = b; break; } }
+    const vx = pb.x * 2, vy = pb.y * 2;        // a sub-zone cell on the vein block
+    w.setRoads([{ gx: vx, gy: vy, dir: null }, { gx: 12, gy: 12, dir: null }]);
+    expect(w.roads.isRoad(vx, vy)).toBe(false);  // vein cell rejected
+    expect(w.roads.isRoad(12, 12)).toBe(true);   // normal cell kept
+
+    pb.explored = true;                          // dozer revealed it
+    w.setRoads([{ gx: vx, gy: vy, dir: null }, { gx: 12, gy: 12, dir: null }]);
+    expect(w.roads.isRoad(vx, vy)).toBe(true);   // now allowed
+  });
+
+  it('a nearby dozer auto-starts and reveals vein blocks by passing over them', () => {
+    const { w, z, dz } = withDozer();
+    const start = z.remaining;
+    let started = false, revealed = 0;
+    for (let t = 0; t < 20000 && z.remaining === start; t++) {
+      w.tick(1 / 30);
+      if (w._dozerPrep.has(dz)) started = true;
+    }
+    expect(started).toBe(true);                // auto-started within range
+    expect(z.remaining).toBeLessThan(start);   // at least one block prepared & revealed
+    for (let y = z.y0; y <= z.y1; y++)
+      for (let x = z.x0; x <= z.x1; x++) if (w.mine.blocks[y][x].explored) revealed++;
+    expect(revealed).toBeGreaterThan(0);
+  });
+
+  it('does not auto-start a dozer that is too far from any vein', () => {
+    const w = new World();
+    const g = w.grid;
+    // far corner, guaranteed >5 blocks from any 10×15 zone in the keep-out-free area
+    const dz = new Vehicle({ type: 'dozer', label: 'DZF', gx: 10, gy: 10, len: g.zoneW * 0.9, wid: g.zoneH * 0.6 });
+    dz.place(g);
+    w.vehicles.push(dz); w.byLabel.set('DZF', dz);
+    w.tick(1 / 30);
+    // (10,10) is in the spawn keep-out; the nearest vein is well beyond 5 blocks
+    expect(w._dozerPrep.has(dz)).toBe(false);
   });
 });

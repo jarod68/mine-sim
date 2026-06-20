@@ -30,6 +30,16 @@ const ORE_MAX = { iron: 55, copper: 50, carbon: 60, gold: 15 };
 // Roughly what share of the map ends up carrying ore.
 const ORE_COVERAGE = 0.45;
 
+// Rich "prep" veins: very rich, HIDDEN ore that a drill can't touch — they must
+// be worked by a dozer (PREP_PASSES passes per block) before the ore is revealed.
+// Zones are organic blobs (irregular outline, varying width/height) but all share
+// the SAME area. See game/world.js for the dozer mechanic.
+const PREP_ZONE_AREA = 150;   // blocks per zone (all zones equal; ~ old 10×15)
+const PREP_ZONE_COUNT = 10;   // zones per map
+const PREP_PASSES = 10;       // dozer passes needed to reveal each block
+// Rich veins skew toward valuable ore.
+const PREP_ORE_WEIGHTED = ['gold', 'gold', 'copper', 'copper', 'carbon', 'iron'];
+
 const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 
 function emptyBlock(x, y) {
@@ -91,6 +101,89 @@ function growDeposit(mine, ore, size) {
   return assigned;
 }
 
+// Stamp PREP_ZONE_COUNT rich veins onto the grid. Each is an organic blob of
+// exactly PREP_ZONE_AREA connected blocks (grown by random frontier expansion, so
+// the outline is irregular and width/height vary) kept a block clear of every
+// other zone. Each block gets rich, hidden ore and prep bookkeeping. Returns the
+// zones' bounding boxes (with a live `remaining` un-revealed count).
+function placePrepZones(mine) {
+  const { cols, rows, blocks } = mine;
+  const zones = [];
+  // No room for a zone of this area (e.g. tiny test maps) → none.
+  if (cols < 24 || rows < 24 || cols * rows < PREP_ZONE_AREA * PREP_ZONE_COUNT * 3) {
+    mine.prepZones = zones; return zones;
+  }
+  // Stay clear of the top-left spawn / parking / demo-circuit area.
+  const keepOut = { x0: 0, y0: 0, x1: 46, y1: 26 };
+  const inKeepOut = (x, y) => x >= keepOut.x0 && x <= keepOut.x1 && y >= keepOut.y0 && y <= keepOut.y1;
+  const claim = new Map();                 // "x,y" → zoneId (blocks already taken)
+  const inBounds = (x, y) => x >= 1 && y >= 1 && x < cols - 1 && y < rows - 1;
+  const adjOther = (x, y, id) => {         // touches a DIFFERENT zone? → keep a 1-block gap
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const o = claim.get(`${x + dx},${y + dy}`);
+        if (o != null && o !== id) return true;
+      }
+    return false;
+  };
+  const free = (x, y, id) => inBounds(x, y) && !inKeepOut(x, y) && !claim.has(`${x},${y}`) && !adjOther(x, y, id);
+
+  let guard = 0;
+  while (zones.length < PREP_ZONE_COUNT && guard++ < 400) {
+    const id = zones.length;
+    let seed = null;
+    for (let t = 0; t < 300 && !seed; t++) {
+      const x = randInt(2, cols - 3), y = randInt(2, rows - 3);
+      if (free(x, y, id)) seed = { x, y };
+    }
+    if (!seed) continue;
+
+    // Grow a connected blob of PREP_ZONE_AREA cells.
+    const cells = [];
+    const taken = [];
+    const frontier = [seed];
+    while (cells.length < PREP_ZONE_AREA && frontier.length) {
+      const { x, y } = frontier.splice(randInt(0, frontier.length - 1), 1)[0];
+      if (!free(x, y, id)) continue;
+      claim.set(`${x},${y}`, id); taken.push(`${x},${y}`); cells.push({ x, y });
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) frontier.push({ x: x + dx, y: y + dy });
+    }
+    if (cells.length < PREP_ZONE_AREA) { for (const k of taken) claim.delete(k); continue; }   // boxed in → retry
+
+    const ore = PREP_ORE_WEIGHTED[randInt(0, PREP_ORE_WEIGHTED.length - 1)];
+    const ceil = ORE_MAX[ore];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const { x, y } of cells) {
+      const b = blocks[y][x];
+      b.prep = true; b.prepZone = id; b.prepPasses = 0; b.prepMax = PREP_PASSES; b.prepDone = false;
+      b.explored = false;
+      setOre(b, ore, randInt(Math.round(ceil * 0.7), ceil));   // rich, hidden
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    zones.push({ x0, y0, x1, y1, remaining: cells.length });
+  }
+  mine.prepZones = zones;
+  return zones;
+}
+
+// Rebuild the zone rectangles (+ live remaining count) from a restored grid, so
+// snapshots only need to carry the per-block prep fields.
+function rebuildPrepZones(blocks) {
+  const byId = new Map();
+  for (const row of blocks)
+    for (const b of row) {
+      if (!b || !b.prep) continue;
+      let z = byId.get(b.prepZone);
+      if (!z) byId.set(b.prepZone, z = { x0: b.x, y0: b.y, x1: b.x, y1: b.y, remaining: 0 });
+      z.x0 = Math.min(z.x0, b.x); z.y0 = Math.min(z.y0, b.y);
+      z.x1 = Math.max(z.x1, b.x); z.y1 = Math.max(z.y1, b.y);
+      if (!b.prepDone) z.remaining++;
+    }
+  const zones = [];
+  for (const [id, z] of byId) zones[id] = z;
+  return zones;
+}
+
 function generateMine(cols, rows) {
   const blocks = [];
   for (let y = 0; y < rows; y++) {
@@ -108,13 +201,19 @@ function generateMine(cols, rows) {
     oreCells += growDeposit(mine, ore, randInt(6, 16));
   }
 
+  placePrepZones(mine);
+
   return mine;
 }
 
 module.exports = {
   generateMine,
+  rebuildPrepZones,
   setOre,
   BLOCK_TONNAGE,
   ORE_TYPES,
   ORE_LABELS,
+  PREP_PASSES,
+  PREP_ZONE_AREA,
+  PREP_ZONE_COUNT,
 };
