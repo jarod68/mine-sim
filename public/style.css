@@ -207,6 +207,101 @@ main {
   pointer-events: none; /* let clicks reach the mine canvas */
 }
 
+/* ── Left fleet panel (comparable asset list) ── */
+.asset-list {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  bottom: 10px;
+  width: 290px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: rgba(24, 27, 33, 0.94);
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  overflow: hidden;
+}
+.asset-list[hidden] { display: none; }
+.al-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2a2e36;
+  background: #20242c;
+}
+.al-title { font-weight: 700; letter-spacing: 0.02em; }
+.al-count {
+  font-variant-numeric: tabular-nums;
+  color: #14161a;
+  background: #f2b81c;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-weight: 700;
+}
+.al-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #9aa0aa;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.al-close:hover { color: #fff; background: none; }
+.al-body { overflow-y: auto; padding: 6px; }
+
+.al-group {
+  color: #8b919c;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  font-weight: 700;
+  margin: 8px 4px 4px;
+}
+.al-group:first-child { margin-top: 2px; }
+
+.al-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.al-row:hover { background: #252a33; }
+.al-row.sel { border-color: #f2b81c; background: rgba(242, 184, 28, 0.1); }
+.al-icon { font-size: 14px; text-align: center; }
+.al-main { min-width: 0; }
+.al-name { font-weight: 600; }
+.al-name .al-model { color: #8b919c; font-weight: 400; margin-left: 4px; }
+.al-stats {
+  color: #c7ccd4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.al-stats .al-bad { color: #e06a5b; }
+.al-stats .al-ok { color: #36c07a; }
+.al-locate {
+  background: #2563c9;
+  border: none;
+  color: #fff;
+  border-radius: 5px;
+  padding: 4px 7px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.al-locate:hover { background: #2f74e0; }
+
 /* ── Floating placement hint ── */
 .place-hint {
   position: absolute;

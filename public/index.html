@@ -12,6 +12,7 @@
     <span id="room-badge" class="room-badge" hidden></span>
     <div class="credit" id="credit">$0</div>
     <button id="about-btn" class="shop-btn about-btn">❓ How to play</button>
+    <button id="assets-btn" class="shop-btn assets-btn">📋 Assets</button>
     <button id="shop-btn" class="shop-btn">🛒 Buy assets</button>
     <div class="tools">
       <ul class="legend">
@@ -35,6 +36,14 @@
     <canvas id="roads-layer"></canvas>
     <canvas id="vehicle-layer"></canvas>
     <div id="popup" class="popup"></div>
+    <aside id="asset-list" class="asset-list" hidden>
+      <header class="al-head">
+        <span class="al-title">Fleet</span>
+        <span class="al-count" id="al-count">0</span>
+        <button class="al-close" id="al-close" aria-label="Close">×</button>
+      </header>
+      <div class="al-body" id="al-body"></div>
+    </aside>
   </main>
 
   <div id="shop" class="shop-modal" hidden></div>

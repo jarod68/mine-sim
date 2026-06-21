@@ -15,6 +15,7 @@ const assetEl = document.getElementById('asset-details');
 const popup = new BlockPopup(document.getElementById('popup'));
 const shopEl = document.getElementById('shop');
 let setMode = () => {};   // assigned by setupModes(); lets other code switch tool mode
+let flyTo = () => {};     // assigned by setupCamera(); smoothly centres the camera on a world point
 
 const net = new Net();
 let game;
@@ -77,6 +78,7 @@ net.onVehicle = (v) => {           // a newly bought asset (no full-state reload
   if (!fleet || !v) return;
   fleet.sync([v]);
   if (!shopEl.hidden) renderShop();
+  if (!assetListEl.hidden) renderAssetList();
 };
 net.onCrusher = (crusher, extra) => {   // a freshly placed crusher
   if (!roads) return;
@@ -298,6 +300,7 @@ function refresh(state) {
   fleet.sync(state.vehicles);
   setCredit(state.credit);   // last → refreshes the open shop with the new count
   fleet.snapToTargets();
+  if (!assetListEl.hidden) renderAssetList();
 }
 
 // ── Parking resize overlay (drag handles on the pad's four sides) ──
@@ -403,6 +406,7 @@ function onLive(data) {
   if ('debug' in data) fleet.debugPaths = data.debug;
   if (data.payouts) for (const p of data.payouts) fleet.addPayout(p.gx, p.gy, p.amount);
   updateAssetLive();
+  updateAssetListLive();
 }
 
 // ── Camera: scroll to zoom, right-drag to pan ──
@@ -425,8 +429,36 @@ function setupCamera() {
     rerender();
   };
 
+  // Smooth "fly to" tween used by the fleet panel's locate buttons. Pans (and
+  // gently zooms in if far out) so the target world point ends up centred.
+  let camAnim = 0;
+  flyTo = (wx, wy) => {
+    cancelPan();                       // a programmatic move overrides any drag
+    const cw = stage.clientWidth, ch = stage.clientHeight;
+    const s0 = camera.scale;
+    const cx0 = (cw / 2 - camera.ox) / s0, cy0 = (ch / 2 - camera.oy) / s0;   // current centre (world)
+    const s1 = Math.min(3, Math.max(s0, 1.6));                                // ensure a readable zoom
+    const t0 = performance.now(), dur = 360;
+    const id = ++camAnim;
+    const step = (now) => {
+      if (id !== camAnim) return;      // superseded by a newer move / manual pan
+      const k = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3); // ease-out cubic
+      const s = s0 + (s1 - s0) * e;
+      const cwx = cx0 + (wx - cx0) * e, cwy = cy0 + (wy - cy0) * e;
+      camera.scale = s;
+      camera.ox = cw / 2 - cwx * s;
+      camera.oy = ch / 2 - cwy * s;
+      rerender();
+      updateParkOverlay();
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+
   stage.addEventListener('wheel', (e) => {
     e.preventDefault();
+    camAnim++;        // a manual zoom cancels any in-flight fly-to
     popup.hide();   // close any open popup when the view moves
     const rect = stage.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -439,19 +471,35 @@ function setupCamera() {
     rerender();
   }, { passive: false });
 
-  let panning = false, px = 0, py = 0;
-  stage.addEventListener('mousedown', (e) => {
-    if (e.button !== 2) return;
-    popup.hide();   // close any open popup when panning the map
-    panning = true; px = e.clientX; py = e.clientY; e.preventDefault();
-  });
-  window.addEventListener('mousemove', (e) => {
+  // Right-button drag to pan. Pointer capture keeps the move/up events flowing to
+  // the stage even when the cursor leaves the window — without it, an off-screen
+  // button-release was missed, leaving panning "stuck" and the view jumping wildly
+  // when the cursor came back. We also bail the instant the right button is no
+  // longer held (e.buttons), so a release we never saw can't strand the drag.
+  let panning = false, px = 0, py = 0, panId = null;
+  function cancelPan() {
     if (!panning) return;
+    panning = false;
+    if (panId != null) { try { stage.releasePointerCapture(panId); } catch { /* not captured */ } panId = null; }
+  }
+  stage.addEventListener('pointerdown', (e) => {
+    if (e.button !== 2) return;
+    camAnim++;        // a manual pan cancels any in-flight fly-to
+    popup.hide();   // close any open popup when panning the map
+    panning = true; px = e.clientX; py = e.clientY; panId = e.pointerId;
+    try { stage.setPointerCapture(e.pointerId); } catch { /* capture unsupported */ }
+    e.preventDefault();
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!panning || e.pointerId !== panId) return;
+    if ((e.buttons & 2) === 0) { cancelPan(); return; }   // right button released off-window
     camera.ox += e.clientX - px; camera.oy += e.clientY - py;
     px = e.clientX; py = e.clientY;
     rerender();
   });
-  window.addEventListener('mouseup', (e) => { if (e.button === 2) panning = false; });
+  stage.addEventListener('pointerup', (e) => { if (e.pointerId === panId) cancelPan(); });
+  stage.addEventListener('pointercancel', () => cancelPan());
+  window.addEventListener('blur', () => cancelPan());
   stage.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('resize', () => { resizeAll(); fit(); });
 
@@ -461,6 +509,7 @@ function setupCamera() {
 
 // ── Asset details panel (top-left) — compact, fields side by side ──
 function renderAsset(v) {
+  markAssetListSelection();   // keep the fleet panel's highlight in sync with the selection
   if (!v) {
     assetEl.innerHTML = '<span class="atitle">Asset</span><span class="muted">No asset selected</span>';
     return;
@@ -566,6 +615,100 @@ function showHint(text) {
   hintEl.hidden = false;
 }
 function hideHint() { if (hintEl) hintEl.hidden = true; }
+
+// ── Left fleet panel: a comparable list of every asset, with a locate button ──
+const assetListEl = document.getElementById('asset-list');
+const assetListBody = document.getElementById('al-body');
+const ASSET_ICON = { oht: '🚛', excavator: '⛏', dozer: '🚜', pickup: '🛻' };
+const ASSET_GROUPS = [
+  ['excavator', 'Shovels'],
+  ['oht', 'Haul trucks'],
+  ['dozer', 'Dozers'],
+  ['pickup', 'Light vehicles'],
+];
+const shortModel = (m) => (m || '').split(' ').pop() || '';
+
+function assetTrucksFor(label) {
+  return fleet.vehicles.reduce((n, x) => n + (x.type === 'oht' && x.shovel === label ? 1 : 0), 0);
+}
+
+// The comparable stat cell for a row — live fields get a class so they can be
+// updated in place without rebuilding the whole list.
+function assetStatsHTML(v) {
+  if (v.type === 'oht')
+    return `<b class="al-load">${Math.round(v.load)}</b>/${v.payload}t · ⛏<span class="al-asg">${v.shovel || '—'}</span>`;
+  if (v.type === 'excavator')
+    return `${v.bucket}t bucket · <span class="al-trucks">${assetTrucksFor(v.label)}</span> trucks`;
+  if (v.type === 'dozer') return 'Track dozer · vein prep';
+  return 'Light vehicle · scout';
+}
+
+function renderAssetList() {
+  if (!fleet || !assetListBody) return;
+  const sel = fleet.selected?.label;
+  let html = '';
+  for (const [type, title] of ASSET_GROUPS) {
+    const list = fleet.vehicles.filter((v) => v.type === type).sort((a, b) => a.label.localeCompare(b.label));
+    if (!list.length) continue;
+    html += `<div class="al-group">${title} · ${list.length}</div>`;
+    for (const v of list) {
+      html += `<div class="al-row${v.label === sel ? ' sel' : ''}" data-label="${v.label}">`
+        + `<span class="al-icon">${ASSET_ICON[v.type] || '•'}</span>`
+        + `<div class="al-main"><div class="al-name">${v.label}<span class="al-model">${shortModel(v.model)}</span></div>`
+        + `<div class="al-stats">${assetStatsHTML(v)}</div></div>`
+        + `<button class="al-locate" title="Centre the camera on this asset" data-label="${v.label}">📍</button>`
+        + '</div>';
+    }
+  }
+  assetListBody.innerHTML = html || '<div class="al-group">No assets</div>';
+  document.getElementById('al-count').textContent = fleet.vehicles.length;
+}
+
+// Cheaply refresh the live numbers (load, assignment, truck counts) in place.
+function updateAssetListLive() {
+  if (!fleet || assetListEl.hidden) return;
+  for (const row of assetListBody.querySelectorAll('.al-row')) {
+    const v = fleet.byLabel.get(row.dataset.label);
+    if (!v) continue;
+    const load = row.querySelector('.al-load');
+    if (load) load.textContent = Math.round(v.load);
+    const asg = row.querySelector('.al-asg');
+    if (asg) asg.textContent = v.shovel || '—';
+    const trk = row.querySelector('.al-trucks');
+    if (trk) trk.textContent = assetTrucksFor(v.label);
+  }
+}
+
+function markAssetListSelection() {
+  if (!assetListBody) return;
+  const sel = fleet?.selected?.label;
+  for (const row of assetListBody.querySelectorAll('.al-row')) row.classList.toggle('sel', row.dataset.label === sel);
+}
+
+function locateAsset(label) {
+  const v = fleet?.byLabel.get(label);
+  if (!v) return;
+  fleet.setSelected(v);   // select + open its details (also highlights the row)
+  flyTo(v.x, v.y);
+}
+
+function toggleAssetList(force) {
+  const show = force ?? assetListEl.hidden;
+  assetListEl.hidden = !show;
+  if (show) renderAssetList();
+}
+
+document.getElementById('assets-btn').addEventListener('click', () => toggleAssetList());
+document.getElementById('al-close').addEventListener('click', () => toggleAssetList(false));
+// Keep map pan/zoom from firing while interacting with the panel.
+assetListEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+assetListEl.addEventListener('wheel', (e) => e.stopPropagation());
+assetListBody.addEventListener('click', (e) => {
+  const loc = e.target.closest('.al-locate');
+  if (loc) { e.stopPropagation(); locateAsset(loc.dataset.label); return; }
+  const row = e.target.closest('.al-row');
+  if (row) { const v = fleet?.byLabel.get(row.dataset.label); if (v) fleet.setSelected(v); }
+});
 
 // Update live values without rebuilding the panel (keeps the dropdown stable).
 function updateAssetLive() {
