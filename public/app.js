@@ -620,11 +620,12 @@ function hideHint() { if (hintEl) hintEl.hidden = true; }
 // ── Left fleet panel: a comparable list of every asset, with a locate button ──
 const assetListEl = document.getElementById('asset-list');
 const assetListBody = document.getElementById('al-body');
-const ASSET_ICON = { oht: '🚛', excavator: '⛏', dozer: '🚜', pickup: '🛻' };
+const ASSET_ICON = { oht: '🚛', excavator: '⛏', dozer: '🚜', grader: '🚧', pickup: '🛻' };
 const ASSET_GROUPS = [
   ['excavator', 'Shovels'],
   ['oht', 'Haul trucks'],
   ['dozer', 'Dozers'],
+  ['grader', 'Graders'],
   ['pickup', 'Light vehicles'],
 ];
 const shortModel = (m) => (m || '').split(' ').pop() || '';
@@ -641,6 +642,7 @@ function assetStatsHTML(v) {
   if (v.type === 'excavator')
     return `${v.bucket}t bucket · <span class="al-trucks">${assetTrucksFor(v.label)}</span> trucks`;
   if (v.type === 'dozer') return 'Track dozer · vein prep';
+  if (v.type === 'grader') return 'Motor grader · road repair';
   return 'Light vehicle · scout';
 }
 
