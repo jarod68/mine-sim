@@ -279,6 +279,34 @@ describe('Autopilot — grader auto-repair', () => {
   });
 });
 
+describe('Autopilot — dozers as priority obstacles', () => {
+  it('counts dozer and grader bodies among the cells haul trucks skirt', () => {
+    const g = grid();
+    const ap = new Autopilot(g, new Roads(g), {});
+    const dz = new Vehicle({ type: 'dozer', label: 'DZ01', gx: 10, gy: 10, len: 12, wid: 10 });
+    const gr = new Vehicle({ type: 'grader', label: 'GR01', gx: 20, gy: 20, len: 14, wid: 5 });
+    dz.place(g); gr.place(g);
+    ap.addDozer(dz); ap.addGrader(gr);
+    const cells = ap._shovelCells();
+    expect(cells.has('10,10')).toBe(true);   // dozer body → trucks skirt it
+    expect(cells.has('20,20')).toBe(true);   // grader body too
+  });
+});
+
+describe('World — dozer follows road flow', () => {
+  it('picks the progress direction matching the one-way flow it sits on', () => {
+    const w = new World();
+    const dz = new Vehicle({ type: 'dozer', label: 'DZ09', gx: 30, gy: 30, len: 12, wid: 10 });
+    dz.place(w.grid);
+    // a single east-flowing road cell under the dozer
+    w.roads.cells.set('30,30', { gx: 30, gy: 30, dir: { dx: 1, dy: 0 } });
+    // both progressing east (with the flow) and south are options → flow wins
+    expect(w._dozerFlowPick(dz, [[0, 1], [1, 0]])).toEqual([1, 0]);
+    // no option aligns with the flow → null (caller keeps its default order)
+    expect(w._dozerFlowPick(dz, [[0, 1], [0, -1]])).toBeNull();
+  });
+});
+
 describe('Autopilot — shovel loading reach', () => {
   it('loads from a road on the same or an adjacent block, not two blocks away', () => {
     const g = grid();

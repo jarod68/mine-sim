@@ -237,6 +237,7 @@ class World {
     this.autopilot.setEnabled(true);
 
     for (const v of this.vehicles) if (v.type === 'grader') this.autopilot.addGrader(v);
+    for (const v of this.vehicles) if (v.type === 'dozer') this.autopilot.addDozer(v);
 
     this._moveTo = new Map();
     this._dozerPrep = new Map();
@@ -462,9 +463,14 @@ class World {
     if (row < 0) { v._prepLine = null; return null; }
     v._prepLine = { y: row, x0: rowMin, x1: rowMax, dir: st.dir };   // for the client overlay
     if (by !== row) {                                // approach the working row, in its span
-      if (bx < rowMin) return [1, 0];
-      if (bx > rowMax) return [-1, 0];
-      return [0, Math.sign(row - by)];
+      const hx = bx < rowMin ? 1 : bx > rowMax ? -1 : 0;   // horizontal progress (0 once in span)
+      const vy = Math.sign(row - by);                       // vertical progress
+      const opts = [];
+      if (hx) opts.push([hx, 0]);
+      if (vy) opts.push([0, vy]);
+      // Follow the road's one-way flow when it lines up with a progress direction,
+      // so the dozer doesn't crawl against haul traffic while crossing the network.
+      return this._dozerFlowPick(v, opts) || opts[0] || null;
     }
     // Sweep THIS row only, overshooting one block past its own last blocks so every
     // block (edges included) gets a pass in both directions (≈ prepMax/2 round trips).
@@ -473,6 +479,18 @@ class World {
     else if (dir < 0 && bx <= rowMin - 1) dir = 1;
     st.dir = dir;
     return [dir, 0];
+  }
+
+  // Of the candidate progress directions, the one matching the one-way flow of the
+  // road the dozer currently sits on (so it travels WITH traffic). Null when the
+  // dozer isn't on a directed road or no candidate aligns — the caller keeps its
+  // default order then (the dozer has right of way; trucks skirt it regardless).
+  _dozerFlowPick(v, opts) {
+    const cell = this.roads.cells.get(key(v.gx, v.gy));
+    const flow = cell && !cell.parking ? cell.dir : null;
+    if (!flow) return null;
+    for (const [dx, dy] of opts) if (dx === flow.dx && dy === flow.dy) return [dx, dy];
+    return null;
   }
 
   _buildOcc() {
@@ -762,6 +780,7 @@ class World {
     } else if (item.type === 'dozer') {
       // Same proportions as the R9400 shovel, a touch smaller.
       v = new Vehicle({ type: 'dozer', label: this._nextLabel('DZ'), gx: cell.gx, gy: cell.gy, len: zone * 1.1, wid: zone * 0.87, model: item.model });
+      this.autopilot.addDozer(v);
     } else if (item.type === 'grader') {
       // As long as a T264 haul truck but half as wide.
       v = new Vehicle({ type: 'grader', label: this._nextLabel('GR'), gx: cell.gx, gy: cell.gy, len: zone * 1.445, wid: zone * 0.35, model: item.model });

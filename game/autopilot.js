@@ -21,6 +21,10 @@ class Autopilot {
     this._shovelMove = new Map();
     this.graders = new Set();
     this._graderState = new Map();   // grader → { target: "gx,gy" | null }
+    // Dozers are driven by the world (vein sweep), but registered here so trucks
+    // treat them as priority obstacles to skirt — a dozer must never get stuck
+    // behind / box in haul traffic.
+    this.dozers = new Set();
     this._manual = new Set();
     this._selected = new Set();   // assets a client is currently inspecting
     this.isFree = null;
@@ -39,6 +43,7 @@ class Autopilot {
 
   addShovel(shovel) { if (shovel) this.shovels.add(shovel); }
   addGrader(grader) { if (grader) this.graders.add(grader); }
+  addDozer(dozer)   { if (dozer) this.dozers.add(dozer); }
 
   // The road network changed (drawn roads, a new crusher): drop the cached crusher
   // bays and every cached distance field so routes are re-planned.
@@ -523,11 +528,15 @@ class Autopilot {
     st.dir = a.dir;
   }
 
-  // Every grid cell currently covered by a shovel's body.
+  // Every grid cell currently covered by a slow off-road WORKER's body — shovels,
+  // dozers and graders. These have priority over haul trucks, which skirt them
+  // rather than wait. (Dozers especially must never be blocked by traffic.)
   _shovelCells() {
     const s = new Set();
-    for (const sh of this.shovels)
-      for (const c of sh.footprintAt(sh.gx, sh.gy, this.grid)) s.add(key(c.gx, c.gy));
+    const add = (v) => { for (const c of v.footprintAt(v.gx, v.gy, this.grid)) s.add(key(c.gx, c.gy)); };
+    for (const sh of this.shovels) add(sh);
+    for (const d of this.dozers) add(d);
+    for (const g of this.graders) add(g);
     return s;
   }
 
@@ -562,14 +571,18 @@ class Autopilot {
   // congesting the lane instead of waiting indefinitely. Never skirts a truck that
   // is queueing for the SAME destination — those wait calmly in line.
   _startDodgeIfStuck(truck, goals, gid, st) {
-    if (st.stuck < STUCK_DODGE || !st.want) return false;
+    if (!st.want) return false;
     const wk = key(st.want.gx, st.want.gy);
-    const blockTruck = this._stationaryTruckAt(st.want.gx, st.want.gy, truck);
+    const byWorker = this._shovelCells().has(wk);
+    // Skirt a slow priority worker (dozer / grader / shovel) quickly; wait the
+    // longer beat before skirting ordinary truck traffic.
+    if (st.stuck < (byWorker ? STUCK_DETOUR : STUCK_DODGE)) return false;
+    const blockTruck = byWorker ? null : this._stationaryTruckAt(st.want.gx, st.want.gy, truck);
     if (blockTruck) {
       const d = this._queueDest(truck, st);
       if (d && d === this._queueDest(blockTruck, this.state.get(blockTruck))) return false; // same queue → wait behind
     }
-    if (!this._shovelCells().has(wk) && !blockTruck) return false;
+    if (!byWorker && !blockTruck) return false;
     const lc = this._logical(truck);
     const target = this._dodgeTarget(truck, goals, gid, lc);
     if (!target) return false;
