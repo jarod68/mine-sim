@@ -21,6 +21,27 @@ body {
   gap: 16px;
 }
 
+/* Every top-bar button shares one size & shape (uniform height, padding, font),
+   so the action buttons and the tool toggles line up cleanly. */
+.topbar button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid #3a4150;
+  border-radius: 6px;
+  background: #2a2f38;
+  color: #e8eaed;
+  cursor: pointer;
+}
+.topbar button:hover { background: #353b45; }
+
 .credit {
   font-size: 20px;
   font-weight: 700;
@@ -140,12 +161,11 @@ button:hover { background: #1f63c0; }
   gap: 6px;
 }
 
-.modes .mode {
-  background: #2a2f38;
-}
-.modes .mode:hover { background: #353b45; }
+/* tool toggles share the base .topbar button style; only the active one is lit */
 .modes .mode.active {
   background: #2c7be5;
+  border-color: #2c7be5;
+  color: #fff;
   box-shadow: inset 0 0 0 2px #5cd17a;
 }
 
@@ -448,17 +468,7 @@ main {
 }
 
 /* ── Shop (buy assets) ── */
-.shop-btn {
-  background: #2f8f5b;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.shop-btn:hover { background: #267a4c; }
+/* .shop-btn / .about-btn share the uniform `.topbar button` style above. */
 
 .shop-modal {
   position: fixed;
@@ -496,8 +506,6 @@ main {
 .shop-close:hover { color: #fff; background: none; }
 
 /* ── About / How-to-play modal (reuses .shop-modal backdrop) ── */
-.about-btn { background: #2563c9; }
-.about-btn:hover { background: #2f74e0; }
 .about-card {
   width: min(560px, 94vw);
   max-height: 86vh;
