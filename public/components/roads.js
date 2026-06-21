@@ -77,6 +77,7 @@ export class Roads {
     for (const c of cells) {
       const cell = this._ensure(c.gx, c.gy);
       cell.dir = c.dir || null;
+      cell.worn = !!c.worn;
     }
     this._invalidate();
   }
@@ -150,8 +151,20 @@ export class Roads {
 
   _ensure(gx, gy) {
     const k = this.key(gx, gy);
-    if (!this.cells.has(k)) this.cells.set(k, { gx, gy, dir: null });
+    if (!this.cells.has(k)) this.cells.set(k, { gx, gy, dir: null, worn: false });
     return this.cells.get(k);
+  }
+
+  // Apply a live worn-state delta from the server: mark the named road cells as
+  // degraded (or smoothed again) and redraw.
+  applyWear(list) {
+    if (!Array.isArray(list)) return;
+    let changed = false;
+    for (const w of list) {
+      const c = this.cells.get(this.key(w.gx, w.gy));
+      if (c && !c.parking) { c.worn = !!w.worn; changed = true; }
+    }
+    if (changed) this._invalidate();
   }
 
   // No road may be drawn on an un-prepared dozer vein (the server rejects it too).
@@ -382,12 +395,26 @@ export class Roads {
     applyCamera(ctx, this.dpr);
 
     // packed-earth "terre battue" clay surface (slight overlap hides sub-pixel
-    // seams between cells)
-    ctx.fillStyle = '#a85d34';
+    // seams between cells). Degraded cells are rendered darker.
     for (const c of this.cells.values()) {
       if (c.parking) continue;
+      ctx.fillStyle = c.worn ? '#5e3520' : '#a85d34';
       ctx.fillRect(c.gx * zoneW, c.gy * zoneH, zoneW + 0.6, zoneH + 0.6);
     }
+    // worn cells get a light diagonal hatch (rutted / broken-up surface)
+    ctx.strokeStyle = 'rgba(16, 8, 4, 0.55)';
+    ctx.lineWidth = Math.max(0.6, Math.min(zoneW, zoneH) * 0.06);
+    ctx.beginPath();
+    for (const c of this.cells.values()) {
+      if (c.parking || !c.worn) continue;
+      const x = c.gx * zoneW, y = c.gy * zoneH;
+      for (let i = 1; i <= 3; i++) {
+        const off = (i / 4) * (zoneW + zoneH);
+        ctx.moveTo(x + Math.max(0, off - zoneH), y + Math.min(off, zoneH));
+        ctx.lineTo(x + Math.min(off, zoneW), y + Math.max(0, off - zoneW));
+      }
+    }
+    ctx.stroke();
 
     // edge lines along the outer sides of the road; yellow & dashed while
     // editing, thin white otherwise.

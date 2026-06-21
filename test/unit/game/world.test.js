@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   World, Vehicle, Roads, Autopilot,
-  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST,
+  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
 } from '../../../game/world.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -150,6 +150,36 @@ describe('Roads', () => {
     roads.setNetwork([{ gx: 1.5, gy: 2 }]); // non-integer coords dropped
     expect(roads.serialize()).toEqual([]);
   });
+
+  it('degrades a cell after the wear limit, then a grader pass repairs it', () => {
+    const roads = new Roads(grid());
+    roads.setNetwork([{ gx: 5, gy: 5 }]);
+    for (let i = 0; i < ROAD_WEAR_LIMIT - 1; i++) expect(roads.wearPass(5, 5)).toBe(false);
+    expect(roads.isWorn(5, 5)).toBe(false);
+    expect(roads.wearPass(5, 5)).toBe(true);    // the pass that tips it over
+    expect(roads.isWorn(5, 5)).toBe(true);
+    expect(roads.wornKeys().has('5,5')).toBe(true);
+    expect(roads.repairCell(5, 5)).toBe(true);  // grader smooths it back out
+    expect(roads.isWorn(5, 5)).toBe(false);
+    expect(roads.wornKeys().size).toBe(0);
+  });
+
+  it('never wears a parking pad cell', () => {
+    const roads = new Roads(grid());
+    roads.addParking(0, 0, 2, 2);
+    for (let i = 0; i < ROAD_WEAR_LIMIT + 5; i++) roads.wearPass(0, 0);
+    expect(roads.isWorn(0, 0)).toBe(false);
+  });
+
+  it('preserves cell wear across a re-draw (client edit) and serializes it', () => {
+    const roads = new Roads(grid());
+    roads.setNetwork([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }]);
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(5, 5);
+    // a client edit re-sends the cell WITHOUT a wear field — wear must survive
+    roads.setNetwork([{ gx: 5, gy: 5, dir: { dx: 1, dy: 0 } }]);
+    expect(roads.isWorn(5, 5)).toBe(true);
+    expect(roads.serialize()[0].wear).toBe(ROAD_WEAR_LIMIT);
+  });
 });
 
 // ── Autopilot pathfinding ───────────────────────────────────────────────────
@@ -194,6 +224,58 @@ describe('Autopilot — distance field', () => {
     const bays = ap._bayCells(10, 10, 11, 11);
     expect(bays.has('10,9')).toBe(true);     // adjacent above
     expect(bays.has('12,12')).toBe(false);   // not adjacent
+  });
+});
+
+describe('Autopilot — grader auto-repair', () => {
+  const g = grid();
+  const longRoad = () => {
+    const roads = new Roads(g);
+    const cells = [];
+    for (let x = 4; x <= 36; x++) cells.push({ gx: x, gy: 20 });
+    roads.setNetwork(cells);
+    const ap = new Autopilot(g, roads, {});
+    ap.setEnabled(true);
+    ap.isFree = () => true;
+    return { roads, ap };
+  };
+  const grader = (gx, gy) => {
+    const v = new Vehicle({ type: 'grader', label: `GR${gx}`, gx, gy, len: 14, wid: 5 });
+    v.place(g);
+    return v;
+  };
+
+  it('sends a lone grader to the nearest worn cell and drives toward it', () => {
+    const { roads, ap } = longRoad();
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(30, 20);
+    const gr = grader(10, 20);
+    ap.addGrader(gr);
+    ap._updateGraders();
+    expect(ap._graderState.get(gr).target).toBe('30,20');
+    expect(ap.controls(gr)).toBe(true);
+    expect(ap.dirFor(gr)).toEqual([1, 0]);          // heads east toward the damage
+  });
+
+  it('fans multiple graders out to different worn areas', () => {
+    const { roads, ap } = longRoad();
+    for (const x of [6, 7, 33, 34]) for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(x, 20);
+    const g1 = grader(4, 20);
+    const g2 = grader(36, 20);
+    ap.addGrader(g1); ap.addGrader(g2);
+    ap._updateGraders();
+    const t1 = ap._graderState.get(g1).target;
+    const t2 = ap._graderState.get(g2).target;
+    expect(t1).not.toBe(t2);                          // spread, not stacked on one cell
+  });
+
+  it('parks a grader (null target) when no road is degraded', () => {
+    const { roads, ap } = longRoad();
+    roads.addParking(0, 0, 6, 3);
+    const gr = grader(20, 20);
+    ap.addGrader(gr);
+    ap._updateGraders();
+    expect(ap._graderState.get(gr).target).toBeNull();
+    expect(ap.dirFor(gr)).not.toBeNull();             // still moving — toward the parking pad
   });
 });
 
@@ -650,6 +732,36 @@ describe('World — collisions & live deltas', () => {
     expect(w._moveTo.has(lv)).toBe(true);
     w.control('LV01', { dir: [1, 0] });
     expect(w._moveTo.has(lv)).toBe(false);
+  });
+
+  it('wears a road on vehicle passes and broadcasts the worn flip; trucks then crawl', () => {
+    const w = new World();
+    w.setRoads([{ gx: 25, gy: 30, dir: { dx: 1, dy: 0 } }]);
+    const lv = w.byLabel.get('LV01');
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) { lv.gx = 25; lv.gy = 30; w._roadPass(lv); }
+    expect(w.roads.isWorn(25, 30)).toBe(true);
+    const d = w.liveDelta();
+    expect(d.roads).toEqual([{ gx: 25, gy: 30, worn: true }]);
+
+    // a haul truck sitting on the degraded cell is slowed to the worn factor
+    const oht = w.byLabel.get('OHT01');
+    oht.gx = 25; oht.gy = 30; oht.place(w.grid);
+    w.tick(1 / 30);
+    expect(oht.speedMul).toBe(WORN_SPEED_MULT);
+  });
+
+  it('a grader pass repairs a degraded cell and broadcasts the fix', () => {
+    const w = new World();
+    w.credit = 1e7;
+    w.setRoads([{ gx: 25, gy: 30 }]);
+    const lv = w.byLabel.get('LV01');
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) { lv.gx = 25; lv.gy = 30; w._roadPass(lv); }
+    w.liveDelta();                                   // drain the "worn" frame
+    const gr = w.byLabel.get(w.buyAsset('CAT24').label);
+    expect(w.autopilot.graders.has(gr)).toBe(true);
+    gr.gx = 25; gr.gy = 30; w._roadPass(gr);         // grader drives onto it
+    expect(w.roads.isWorn(25, 30)).toBe(false);
+    expect(w.liveDelta().roads).toEqual([{ gx: 25, gy: 30, worn: false }]);
   });
 
   it('round-trips the full world through toSnapshot / fromSnapshot', () => {

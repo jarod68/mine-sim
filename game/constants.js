@@ -19,6 +19,11 @@ const DRILL_COST = 5000;
 // A dozer auto-starts preparing a rich vein when idle within this many blocks of it.
 const DOZER_PREP_RANGE = 5;
 
+// Road wear: a cell degrades after this many vehicle passes; degraded cells are
+// rendered dark/hatched, slow haul trucks down, and are repaired by a grader pass.
+const ROAD_WEAR_LIMIT = 75;
+const WORN_SPEED_MULT = 0.5;        // haul-truck speed factor over a degraded cell
+
 const ORE_VALUE = {
   iron:   10000 / 240,
   copper: 16000 / 240,
@@ -51,6 +56,7 @@ const SPECS = {
   excavator: { model: 'Liebherr R9400', bucket: 40 },
   oht:       { model: 'Liebherr T264', payload: 240 },
   dozer:     { model: 'Liebherr PR776' },
+  grader:    { model: 'Caterpillar 24' },
 };
 
 // Excavator reference models. `scale` multiplies the base visual size.
@@ -77,6 +83,7 @@ const CATALOG = [
   { id: 'R9600', type: 'excavator', model: 'Liebherr R9600',        price: 600000, spec: 'Shovel — 60 t bucket' },
   { id: 'R9800', type: 'excavator', model: 'Liebherr R9800',        price: 800000, spec: 'Shovel — 75 t bucket' },
   { id: 'PR776', type: 'dozer',     model: 'Liebherr PR776',        price: 500000, spec: 'Track dozer — blade & ripper' },
+  { id: 'CAT24', type: 'grader',    model: 'Caterpillar 24',        price: 350000, spec: 'Motor grader — full-width blade' },
 ];
 
 // ── Autopilot tuning ──
@@ -103,7 +110,7 @@ const rectsOverlap = (a, b) =>
 
 module.exports = {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
-  STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE,
+  STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
   ORE_VALUE, PARKING, PARK_HEADING, PARK_BLOCKS,
   BASE_SPEED, TRUCK_COLLISION_SCALE, SPECS, EXCAVATORS,
   SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,

@@ -97,6 +97,7 @@ export class Vehicle {
       const oreColor = this.loadOre ? COLORS_SOLID[this.loadOre] : null;
       drawOHT(ctx, this.len, this.wid, this.load, oreColor, modelTag);
     } else if (this.type === 'dozer') drawDozer(ctx, this.len, this.wid, modelTag);
+    else if (this.type === 'grader') drawGrader(ctx, this.len, this.wid, modelTag);
     else drawPickup(ctx, this.len, this.wid);
     ctx.restore();
 
@@ -327,7 +328,7 @@ export class Fleet {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.round(s * 1.4)}px system-ui`;
+    ctx.font = `bold ${Math.round(s * 0.7)}px system-ui`;
     ctx.lineWidth = Math.max(1, s * 0.12);
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
     for (const p of this._payouts) {
@@ -611,6 +612,98 @@ function drawDozer(ctx, L, W, modelTag = null) {
     ctx.textBaseline = 'middle';
     const m = ctx.measureText(modelTag);
     const tw = (m && m.width) || fs * 3;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(-tw / 2 - 1.5, -fs * 0.62, tw + 3, fs * 1.24, 1.5);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(40, 45, 55, 0.9)';
+    ctx.fillText(modelTag, 0, 0);
+    ctx.restore();
+  }
+}
+
+// Motor grader (CAT 24) — a long, narrow construction-yellow machine, ~half the
+// width of a haul truck but just as long. Top view, front toward +x:
+//   • front tip = a single steered axle (two wheels) right at the nose,
+//   • a full-width angled blade (moldboard) just behind the front axle,
+//   • a black square cab amidships with a flashing beacon (like the dozer),
+//   • rear 30% = the engine deck riding over the tandem rear wheels.
+function drawGrader(ctx, L, W, modelTag = null) {
+  // ── tyres (dark): front steer axle + rear tandem, sticking out past the body ──
+  ctx.fillStyle = '#111317';
+  const wl = L * 0.11;                 // wheel length (along travel)
+  const wheel = (ax) => {
+    ctx.fillRect(ax - wl / 2, W * 0.30, wl, W * 0.34);    // right
+    ctx.fillRect(ax - wl / 2, -W * 0.64, wl, W * 0.34);   // left
+  };
+  wheel(L * 0.40);                     // front steer axle (at the nose)
+  wheel(-L * 0.28);                    // rear tandem (front pair)
+  wheel(-L * 0.42);                    // rear tandem (rear pair)
+
+  // ── chassis: the long "gooseneck" frame beam from front axle back to engine,
+  // bright yellow so the whole machine reads as one connected body ──
+  ctx.fillStyle = '#f2c218';
+  ctx.beginPath(); ctx.roundRect(-L * 0.5, -W * 0.18, L * 0.95, W * 0.36, W * 0.09); ctx.fill();
+  ctx.strokeStyle = '#b07f10'; ctx.lineWidth = Math.max(0.5, W * 0.03);
+  ctx.beginPath(); ctx.roundRect(-L * 0.5, -W * 0.18, L * 0.95, W * 0.36, W * 0.09); ctx.stroke();
+
+  // ── engine deck (rear 30% of the length) — yellow, louvered, with an exhaust ──
+  ctx.fillStyle = '#f2c218';
+  ctx.beginPath(); ctx.roundRect(-L * 0.5, -W * 0.42, L * 0.30, W * 0.84, 2); ctx.fill();
+  ctx.strokeStyle = '#b07f10'; ctx.lineWidth = Math.max(0.6, W * 0.05);
+  ctx.beginPath();
+  for (let gx = -L * 0.46; gx <= -L * 0.24; gx += L * 0.05) { ctx.moveTo(gx, -W * 0.30); ctx.lineTo(gx, W * 0.30); }
+  ctx.stroke();
+  const er = Math.min(L, W) * 0.06;
+  ctx.fillStyle = '#2c2f34';
+  ctx.beginPath(); ctx.arc(-L * 0.22, -W * 0.30, er, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#6b7077'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(-L * 0.22, -W * 0.30, er, 0, Math.PI * 2); ctx.stroke();
+
+  // ── moldboard (blade): full-width steel set on a diagonal, between the cab and
+  // the front axle (front ~third of the machine). ──
+  ctx.save();
+  ctx.translate(L * 0.18, 0);
+  ctx.rotate(0.34);                    // angle the blade like a working grader
+  ctx.fillStyle = '#c7ccd2';
+  ctx.beginPath(); ctx.roundRect(-L * 0.035, -W * 0.66, L * 0.07, W * 1.32, 1.5); ctx.fill();
+  ctx.strokeStyle = '#9aa0aa'; ctx.lineWidth = Math.max(1, L * 0.012);
+  ctx.beginPath(); ctx.roundRect(-L * 0.035, -W * 0.66, L * 0.07, W * 1.32, 1.5); ctx.stroke();
+  ctx.restore();
+  // the circle/drawbar tying the blade back to the frame
+  ctx.fillStyle = '#b9bec5';
+  ctx.beginPath(); ctx.roundRect(L * 0.02, -W * 0.07, L * 0.18, W * 0.14, 1); ctx.fill();
+
+  // ── cab: a black SQUARE amidships, thin white outline (like the dozer). Sharp
+  // corners (only a hair of rounding) so it reads as a square, not a disc. ──
+  const cabHalf = W * 0.33;
+  const cabCx = -L * 0.02;
+  const cabR = Math.max(0.3, W * 0.04);
+  ctx.fillStyle = '#111317';
+  ctx.beginPath(); ctx.roundRect(cabCx - cabHalf, -cabHalf, cabHalf * 2, cabHalf * 2, cabR); ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = Math.max(0.4, W * 0.035);
+  ctx.stroke();
+
+  // flashing beacon (gyrophare) on the cab roof, same as the dozer
+  const on = (performance.now() % 700) < 350;
+  const gbr = Math.min(L, W) * 0.055;
+  if (on) { ctx.shadowColor = 'rgba(255, 140, 0, 0.95)'; ctx.shadowBlur = 9; }
+  ctx.fillStyle = on ? '#ff9b1a' : '#7a4a12';
+  ctx.beginPath(); ctx.arc(cabCx, -cabHalf * 0.5, gbr, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // model tag on the engine deck, turned 90° on its own white pad (like the dozer)
+  if (modelTag) {
+    const fs = Math.max(2, W * 0.20);
+    ctx.save();
+    ctx.translate(-L * 0.35, 0);
+    ctx.rotate(-Math.PI / 2);
+    ctx.font = `bold ${fs.toFixed(1)}px system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const m = ctx.measureText(modelTag);
+    const tw = (m && m.width) || fs * 2;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.roundRect(-tw / 2 - 1.5, -fs * 0.62, tw + 3, fs * 1.24, 1.5);

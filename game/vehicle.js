@@ -15,7 +15,9 @@ class Vehicle {
     this.len = len; this.wid = wid;
     this.speed = type === 'excavator' ? BASE_SPEED / 4
       : type === 'dozer' ? BASE_SPEED / 3
-      : type === 'oht' ? BASE_SPEED / 2 : BASE_SPEED;
+      : type === 'oht' ? BASE_SPEED / 2
+      : type === 'grader' ? BASE_SPEED * 0.6   // 40% slower than a light vehicle
+      : BASE_SPEED;
     this.roadOnly = type === 'oht';
     const spec = SPECS[type] || {};
     this.model = model || spec.model || type;
@@ -23,6 +25,9 @@ class Vehicle {
     this.bucket = bucket ?? spec.bucket ?? null;
     this.x = 0; this.y = 0;
     this.heading = 0;
+    // Speed factor for the current cell (set by the world each tick; 1 = normal,
+    // <1 over a degraded road segment).
+    this.speedMul = 1;
     this.moving = false;
     this.load = 0;
     this.loadOre = null;
@@ -48,7 +53,7 @@ class Vehicle {
       const dx = tx - this.x;
       const dy = ty - this.y;
       const dist = Math.hypot(dx, dy);
-      const step = this.speed * dt;
+      const step = this.speed * (this.speedMul || 1) * dt;
       if (dist <= step) {
         this.x = tx; this.y = ty;
         this.gx = this.tgx; this.gy = this.tgy;

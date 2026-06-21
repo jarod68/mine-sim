@@ -12,7 +12,7 @@ const { Autopilot } = require('./autopilot');
 const { MinHeap } = require('./min-heap');
 const {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
-  STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE,
+  STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
   ORE_VALUE, PARKING, PARK_HEADING, PARK_BLOCKS,
   EXCAVATORS, SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
   DIRS, key, rectsOverlap,
@@ -139,6 +139,8 @@ class World {
     this._moveTo = new Map();
     // Dozers actively preparing a rich vein (vehicle → { veinId, dir, lastBlock }).
     this._dozerPrep = new Map();
+    // Road cells whose degraded state flipped this frame, queued for the broadcast.
+    this._roadDirty = new Set();
     this._boughtCrushers = 0;   // extra crushers the player has purchased
 
 
@@ -234,8 +236,11 @@ class World {
     for (const lbl of snap.manual || []) { const v = this.byLabel.get(lbl); if (v) { v.manual = true; this.autopilot.setManual(v); } }
     this.autopilot.setEnabled(true);
 
+    for (const v of this.vehicles) if (v.type === 'grader') this.autopilot.addGrader(v);
+
     this._moveTo = new Map();
     this._dozerPrep = new Map();
+    this._roadDirty = new Set();
     for (const [lbl, t] of snap.moveTo || []) this.moveTo(lbl, t.gx, t.gy);
 
     this._lastVeh = new Map();
@@ -349,10 +354,24 @@ class World {
       else if (v.manual && v.manualDir) dir = v.manualDir;
       else if (this._dozerPrep.has(v)) dir = this._dozerStep(v);   // preparing a rich vein
       else if (this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
+      // Haul trucks crawl over degraded road segments (only the impacted cells).
+      if (v.type === 'oht')
+        v.speedMul = (this.roads.isWorn(v.gx, v.gy) || (v.moving && this.roads.isWorn(v.tgx, v.tgy))) ? WORN_SPEED_MULT : 1;
+      const pgx = v.gx, pgy = v.gy;
       const oldKeys = this._occKeys(v);
       v.update(dt, dir, this.grid, isRoad, isFree);
       this._reindexOcc(v, oldKeys);
+      if (v.gx !== pgx || v.gy !== pgy) this._roadPass(v);   // entered a new cell → wear / repair
     }
+  }
+
+  // A vehicle just entered cell (v.gx,v.gy). A grader smooths a degraded road cell
+  // back out; any other vehicle wears it a little. Worn-state flips are queued for
+  // the live broadcast so clients re-render the affected cell.
+  _roadPass(v) {
+    if (!this.roads.isRoad(v.gx, v.gy)) return;
+    const flipped = v.type === 'grader' ? this.roads.repairCell(v.gx, v.gy) : this.roads.wearPass(v.gx, v.gy);
+    if (flipped) this._roadDirty.add(key(v.gx, v.gy));
   }
 
   // True when anything is (or is about to start) moving — drives the loop's
@@ -743,6 +762,10 @@ class World {
     } else if (item.type === 'dozer') {
       // Same proportions as the R9400 shovel, a touch smaller.
       v = new Vehicle({ type: 'dozer', label: this._nextLabel('DZ'), gx: cell.gx, gy: cell.gy, len: zone * 1.1, wid: zone * 0.87, model: item.model });
+    } else if (item.type === 'grader') {
+      // As long as a T264 haul truck but half as wide.
+      v = new Vehicle({ type: 'grader', label: this._nextLabel('GR'), gx: cell.gx, gy: cell.gy, len: zone * 1.445, wid: zone * 0.35, model: item.model });
+      this.autopilot.addGrader(v);
     } else {
       v = new Vehicle({ type: 'pickup', label: this._nextLabel('LV'), gx: cell.gx, gy: cell.gy, len: zone * 0.95, wid: zone * 0.57 });
     }
@@ -959,10 +982,20 @@ class World {
     const payouts = this._payouts.length ? this._payouts : null;
     if (payouts) this._payouts = [];
 
-    if (!vehicles.length && !blocks.length && !creditChanged && !payouts) return null;
+    let roads = null;
+    if (this._roadDirty.size) {
+      roads = [...this._roadDirty].map((k) => {
+        const [gx, gy] = k.split(',').map(Number);
+        return { gx, gy, worn: this.roads.isWorn(gx, gy) };
+      });
+      this._roadDirty.clear();
+    }
+
+    if (!vehicles.length && !blocks.length && !creditChanged && !payouts && !roads) return null;
     const msg = { vehicles, blocks };
     if (creditChanged) msg.credit = this.credit;
     if (payouts) msg.payouts = payouts;
+    if (roads) msg.roads = roads;
     return msg;
   }
 
@@ -1005,4 +1038,5 @@ function fieldEq(a, b) {
 module.exports = {
   World, Vehicle, Roads, Autopilot,
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST,
+  ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
 };

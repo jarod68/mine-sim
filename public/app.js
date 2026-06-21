@@ -405,6 +405,7 @@ function onLive(data) {
   }
   if ('debug' in data) fleet.debugPaths = data.debug;
   if (data.payouts) for (const p of data.payouts) fleet.addPayout(p.gx, p.gy, p.amount);
+  if (data.roads && roads) roads.applyWear(data.roads);
   updateAssetLive();
   updateAssetListLive();
 }

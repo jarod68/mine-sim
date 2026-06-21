@@ -35,8 +35,9 @@ function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000
         if (!live && !debugChanged && !posBuf) continue;
 
         if (live || debugChanged) {
-          const msg = { t: 'live', vehicles: live?.vehicles || [], blocks: live?.blocks || [] };
-          if (live && 'credit' in live) msg.credit = live.credit;
+          // Forward every field liveDelta produced (vehicles, blocks, and any of
+          // credit / payouts / roads) — not just a hand-picked subset.
+          const msg = live ? { t: 'live', ...live } : { t: 'live', vehicles: [], blocks: [] };
           if (debugChanged || Object.keys(debug).length) msg.debug = debug;
           roomBroadcast(room, msg);
         }

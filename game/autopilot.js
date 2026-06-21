@@ -19,6 +19,8 @@ class Autopilot {
     this._rank = new Map();          // truck → stable priority (first-seen order)
     this.shovels = new Set();
     this._shovelMove = new Map();
+    this.graders = new Set();
+    this._graderState = new Map();   // grader → { target: "gx,gy" | null }
     this._manual = new Set();
     this._selected = new Set();   // assets a client is currently inspecting
     this.isFree = null;
@@ -36,6 +38,7 @@ class Autopilot {
   }
 
   addShovel(shovel) { if (shovel) this.shovels.add(shovel); }
+  addGrader(grader) { if (grader) this.graders.add(grader); }
 
   // The road network changed (drawn roads, a new crusher): drop the cached crusher
   // bays and every cached distance field so routes are re-planned.
@@ -73,10 +76,12 @@ class Autopilot {
 
   controls(v) {
     if (!this.enabled || this._manual.has(v)) return false;
+    if (this.graders.has(v)) return true;
     return this.links.has(v) || this._shovelMove.has(v);
   }
 
   dirFor(v) {
+    if (this.graders.has(v)) return this._graderStep(v);
     if (this._shovelMove.has(v)) return this._shovelStep(v);
     return this.state.get(v)?.dir ?? null;
   }
@@ -90,6 +95,7 @@ class Autopilot {
     for (const [truck, st] of this.state) dirOf.set(truck, st.dir);
     this._resolveDeadlocks(dirOf);
     this._updateShovels();
+    this._updateGraders();
   }
 
   _shovelHolder(shovel)          { return this._shovelLock.get(shovel) ?? null; }
@@ -207,6 +213,84 @@ class Autopilot {
     if (a.hasRoad !== b.hasRoad) return a.hasRoad;
     if (a.dist !== b.dist) return a.dist < b.dist;
     return a.ore > b.ore;
+  }
+
+  // ── grader auto-repair ───────────────────────────────────────────────────────
+  // Idle graders patrol the map and smooth out degraded roads on their own. Each
+  // grader is given the nearest worn cell that another grader isn't already heading
+  // for (so several graders fan out to different areas); the cell is repaired the
+  // moment the grader drives onto it (world tick). With no worn road left, graders
+  // return to the parking pad and wait.
+  _updateGraders() {
+    if (!this.graders.size) return;
+    const worn = this.roads.wornKeys();
+    // Hold onto every still-valid target so we don't reassign a grader mid-trip and
+    // so other graders steer clear of cells already being serviced.
+    const claimed = new Set();
+    for (const g of this.graders) {
+      if (this._manual.has(g)) continue;
+      const st = this._graderState.get(g);
+      if (st && st.target && worn.has(st.target)) claimed.add(st.target);
+    }
+    for (const g of this.graders) {
+      if (this._manual.has(g)) { this._graderState.delete(g); continue; }
+      let st = this._graderState.get(g);
+      if (!st) { st = { target: null }; this._graderState.set(g, st); }
+      if (!(st.target && worn.has(st.target))) {     // need a fresh target
+        st.target = this._pickGraderTarget(g, worn, claimed);
+        if (st.target) claimed.add(st.target);
+      }
+    }
+  }
+
+  // Nearest worn cell to this grader that's at least SPREAD cells from every cell
+  // another grader has claimed — so multiple graders disperse. Falls back to the
+  // plain nearest worn cell when there are more graders than distinct clusters.
+  _pickGraderTarget(grader, worn, claimed) {
+    if (!worn.size) return null;
+    const a = this._logical(grader);
+    const SPREAD = 10;
+    let best = null, bestD = Infinity, nearest = null, nearestD = Infinity;
+    for (const wk of worn) {
+      const [gx, gy] = wk.split(',').map(Number);
+      const d = Math.abs(a.gx - gx) + Math.abs(a.gy - gy);
+      if (d < nearestD) { nearestD = d; nearest = wk; }
+      let clear = true;
+      for (const ck of claimed) {
+        const [cx, cy] = ck.split(',').map(Number);
+        if (Math.abs(cx - gx) + Math.abs(cy - gy) < SPREAD) { clear = false; break; }
+      }
+      if (clear && d < bestD) { bestD = d; best = wk; }
+    }
+    return best || nearest;
+  }
+
+  // One step for a grader: drive (off-road as needed — graders aren't road-bound)
+  // straight toward its worn-cell target, or to a free parking cell when idle.
+  _graderStep(grader) {
+    const st = this._graderState.get(grader);
+    if (st && st.target) {
+      const [gx, gy] = st.target.split(',').map(Number);
+      return this._offroadStep(grader, { gx, gy });
+    }
+    const slot = this._nearestFreeParkingCell(grader);
+    return slot ? this._offroadStep(grader, slot) : null;
+  }
+
+  // Closest parking-pad cell this grader can occupy — its resting spot when no road
+  // needs repair.
+  _nearestFreeParkingCell(grader) {
+    const a = this._logical(grader);
+    let best = null, bestD = Infinity;
+    for (const p of this.roads.parkings || [])
+      for (let gy = p.y; gy < p.y + p.h; gy++)
+        for (let gx = p.x; gx < p.x + p.w; gx++) {
+          const d = Math.abs(a.gx - gx) + Math.abs(a.gy - gy);
+          if (d >= bestD) continue;
+          if (!this._canOccupy(grader, gx, gy, 0, 0)) continue;
+          bestD = d; best = { gx, gy };
+        }
+    return best;
   }
 
   setSelected(v, on) {
