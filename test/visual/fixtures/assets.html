@@ -1,12 +1,12 @@
 <!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;background:#caa472}canvas{display:block}
 </style></head><body>
-<canvas id="c" width="760" height="440"></canvas>
+<canvas id="c" width="760" height="660"></canvas>
 <script type="module">
   try { performance.now = () => 0; } catch {}   // freeze the flashing beacon
   import { Vehicle } from '/public/components/vehicle.js';
   const ctx = document.getElementById('c').getContext('2d');
-  ctx.fillStyle = '#caa472'; ctx.fillRect(0, 0, 760, 440);
+  ctx.fillStyle = '#caa472'; ctx.fillRect(0, 0, 760, 660);
   const Z = 16;
   // One representative of every asset type the catalog can build (model tag kept,
   // instance label blanked so the sprites read cleanly).
@@ -17,8 +17,9 @@
     { type: 'excavator', model: 'Liebherr R9800', bucket: 75, len: Z * 1.2 * 1.9125, wid: Z * 0.95 * 1.9125 },
     { type: 'oht',       model: 'Liebherr T264', payload: 240, len: Z * 1.445, wid: Z * 0.7 },
     { type: 'dozer',     model: 'Liebherr PR776', len: Z * 1.1, wid: Z * 0.87 },
+    { type: 'grader',    model: 'Caterpillar 24', len: Z * 1.445, wid: Z * 0.35 },
   ];
-  const cols = 3, scale = 4.5, cw = 760 / cols, ch = 440 / 2;
+  const cols = 3, scale = 4.5, cw = 760 / cols, ch = 660 / 3;
   assets.forEach((a, i) => {
     const v = new Vehicle({ label: '', gx: 0, gy: 0, ...a });
     v.heading = 0;

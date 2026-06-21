@@ -11,9 +11,11 @@
   const roads = new Roads(document.getElementById('c'), view, grid);
 
   const cells = [];
-  for (let gx = 5; gx <= 24; gx++) cells.push({ gx, gy: 12, dir: { dx: 1, dy: 0 } });   // east
-  for (let gx = 5; gx <= 24; gx++) cells.push({ gx, gy: 13, dir: { dx: -1, dy: 0 } });  // west (divided)
-  for (let gy = 6; gy <= 18; gy++) cells.push({ gx: 14, gy, dir: { dx: 0, dy: 1 } });   // south (junction)
+  // The whole divided east-west road is degraded (darker + hatched, worn down by
+  // traffic); the vertical junction arm is left fresh for contrast.
+  for (let gx = 5; gx <= 24; gx++) cells.push({ gx, gy: 12, dir: { dx: 1, dy: 0 }, worn: true });   // east (worn)
+  for (let gx = 5; gx <= 24; gx++) cells.push({ gx, gy: 13, dir: { dx: -1, dy: 0 }, worn: true });  // west (worn, divided)
+  for (let gy = 6; gy <= 18; gy++) cells.push({ gx: 14, gy, dir: { dx: 0, dy: 1 } });               // south (fresh junction)
   roads.load(cells);
 
   camera.scale = 1.5; camera.ox = -60; camera.oy = -120;
