@@ -201,6 +201,12 @@ class World {
     this._boughtCrushers = snap.boughtCrushers || 0;
     this.dirty = new Map();
     this.mine = { cols: COLS, rows: ROWS, blocks: snap.blocks };
+    // Back-compat: snapshots saved before the prep-zone→vein rename carry `prepZone`
+    // on vein blocks. Without this, rebuildVeins/_updateDozers find no veins and the
+    // dozer sweep silently dies on restored old games.
+    for (const row of this.mine.blocks)
+      for (const b of row)
+        if (b && b.prep && b.veinId == null && b.prepZone != null) { b.veinId = b.prepZone; delete b.prepZone; }
     this.mine.veins = rebuildVeins(snap.blocks);   // derived from the per-block prep fields
     this.crushers = snap.crushers || [];
 
