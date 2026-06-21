@@ -267,7 +267,7 @@ main {
 
 .al-row {
   display: grid;
-  grid-template-columns: 18px 1fr auto;
+  grid-template-columns: 34px 1fr auto;
   align-items: center;
   gap: 6px;
   padding: 6px 7px;
@@ -277,7 +277,8 @@ main {
 }
 .al-row:hover { background: #252a33; }
 .al-row.sel { border-color: #f2b81c; background: rgba(242, 184, 28, 0.1); }
-.al-icon { font-size: 14px; text-align: center; }
+.al-icon { display: flex; align-items: center; justify-content: center; }
+.al-svg { width: 32px; height: 24px; display: block; }
 .al-main { min-width: 0; }
 .al-name { font-weight: 600; }
 .al-name .al-model { color: #8b919c; font-weight: 400; margin-left: 4px; }

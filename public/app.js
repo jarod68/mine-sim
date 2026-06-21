@@ -620,7 +620,45 @@ function hideHint() { if (hintEl) hintEl.hidden = true; }
 // ── Left fleet panel: a comparable list of every asset, with a locate button ──
 const assetListEl = document.getElementById('asset-list');
 const assetListBody = document.getElementById('al-body');
-const ASSET_ICON = { oht: '🚛', excavator: '⛏', dozer: '🚜', grader: '🚧', pickup: '🛻' };
+// Generated FRONT-ON illustrations of each vehicle (not the top-down sprite),
+// reusing the sprite palette so the fleet list reads at a glance: construction
+// yellow for the light vehicle / grader, white machines for the shovel / dozer /
+// haul truck, dark tyres & tracks, black cab + orange beacon for blade machines.
+function assetSvg(type) {
+  const svg = (inner) => `<svg viewBox="0 0 40 30" class="al-svg" aria-hidden="true">${inner}</svg>`;
+  switch (type) {
+    case 'oht': return svg(   // haul truck — tall, big tyres, canopy, grille
+      '<rect x="1" y="15" width="9" height="12" rx="2" fill="#111317"/><rect x="30" y="15" width="9" height="12" rx="2" fill="#111317"/>'
+      + '<rect x="6" y="2" width="28" height="6" rx="1.5" fill="#f7f8fa"/>'
+      + '<rect x="8" y="6" width="24" height="18" rx="2" fill="#eef0f2"/>'
+      + '<rect x="11" y="9" width="18" height="6.5" rx="1" fill="#1d2a36"/>'
+      + '<rect x="12" y="18" width="16" height="4" rx="1" fill="#34373c"/>'
+      + '<rect x="9" y="17.5" width="3" height="3" rx="0.6" fill="#fff3b0"/><rect x="28" y="17.5" width="3" height="3" rx="0.6" fill="#fff3b0"/>');
+    case 'excavator': return svg(   // shovel — tracks both sides, white house, boom + bucket
+      '<rect x="2" y="8" width="7" height="18" rx="2" fill="#15171b"/><rect x="31" y="8" width="7" height="18" rx="2" fill="#15171b"/>'
+      + '<rect x="9" y="9" width="22" height="14" rx="2" fill="#eef0f2"/>'
+      + '<rect x="11.5" y="11" width="9" height="8" rx="1" fill="#1d2a36"/>'
+      + '<rect x="24" y="5" width="4" height="19" rx="1.5" fill="#b9bdc4"/>'
+      + '<rect x="22.5" y="24" width="7" height="4.5" rx="1.2" fill="#54585f"/>');
+    case 'dozer': return svg(   // track dozer — white body, black cab + beacon, wide blade
+      '<rect x="3" y="9" width="6" height="14" rx="1.5" fill="#15171b"/><rect x="31" y="9" width="6" height="14" rx="1.5" fill="#15171b"/>'
+      + '<rect x="9" y="7" width="22" height="12" rx="2" fill="#e8eaed"/>'
+      + '<rect x="14" y="3" width="12" height="7" rx="1.5" fill="#111317"/><circle cx="20" cy="3" r="1.5" fill="#ff9b1a"/>'
+      + '<rect x="2" y="22" width="36" height="5" rx="1.5" fill="#c7ccd2"/><rect x="2" y="22" width="36" height="1.8" rx="0.9" fill="#dadfe5"/>');
+    case 'grader': return svg(   // motor grader — yellow, black cab + beacon, low full-width blade
+      '<rect x="6" y="18" width="6" height="9" rx="1.5" fill="#111317"/><rect x="28" y="18" width="6" height="9" rx="1.5" fill="#111317"/>'
+      + '<rect x="13" y="8" width="14" height="15" rx="2" fill="#f2c218"/>'
+      + '<rect x="14" y="3" width="12" height="8" rx="1.5" fill="#111317"/><circle cx="20" cy="3" r="1.5" fill="#ff9b1a"/>'
+      + '<rect x="15" y="13" width="10" height="4" rx="1" fill="#1d2a36"/>'
+      + '<rect x="3" y="23" width="34" height="4" rx="1.5" fill="#c7ccd2"/>');
+    default: return svg(   // light utility vehicle — yellow pickup
+      '<rect x="4" y="20" width="6" height="6" rx="1.5" fill="#111317"/><rect x="30" y="20" width="6" height="6" rx="1.5" fill="#111317"/>'
+      + '<rect x="5" y="11" width="30" height="12" rx="2" fill="#f2c218"/>'
+      + '<rect x="11" y="5" width="18" height="9" rx="2" fill="#f7d65a"/>'
+      + '<rect x="13" y="6.5" width="14" height="6" rx="1" fill="#1d2a36"/>'
+      + '<rect x="6" y="16" width="4.5" height="3" rx="0.8" fill="#fff3b0"/><rect x="29.5" y="16" width="4.5" height="3" rx="0.8" fill="#fff3b0"/>');
+  }
+}
 const ASSET_GROUPS = [
   ['excavator', 'Shovels'],
   ['oht', 'Haul trucks'],
@@ -656,7 +694,7 @@ function renderAssetList() {
     html += `<div class="al-group">${title} · ${list.length}</div>`;
     for (const v of list) {
       html += `<div class="al-row${v.label === sel ? ' sel' : ''}" data-label="${v.label}">`
-        + `<span class="al-icon">${ASSET_ICON[v.type] || '•'}</span>`
+        + `<span class="al-icon">${assetSvg(v.type)}</span>`
         + `<div class="al-main"><div class="al-name">${v.label}<span class="al-model">${shortModel(v.model)}</span></div>`
         + `<div class="al-stats">${assetStatsHTML(v)}</div></div>`
         + `<button class="al-locate" title="Centre the camera on this asset" data-label="${v.label}">📍</button>`
