@@ -18,7 +18,17 @@ function adminRouter({ rooms, adminUser, adminPass, graceMs }) {
   router.get('/admin', guard, (req, res) => res.sendFile(path.join(__dirname, '..', 'admin.html')));
 
   router.get('/admin/api/sessions', guard, (req, res) =>
-    res.json(buildAdminData({ rooms: rooms.rooms, sessionLog: rooms.sessionLog, eventLog: rooms.eventLog, graceMs })));
+    res.json(buildAdminData({
+      rooms: rooms.rooms, sessionLog: rooms.sessionLog, eventLog: rooms.eventLog, graceMs,
+      restorableCodes: rooms.restorableCodes(),
+    })));
+
+  // Reactivate an ended game from its kept snapshot.
+  router.post('/admin/api/restore', guard, express.json({ limit: '1kb' }), (req, res) => {
+    const r = rooms.restore((req.body || {}).code);
+    if (r.error) return res.status(r.error === 'not found' ? 404 : 409).json(r);
+    res.json(r);
+  });
 
   router.post('/admin/api/credit', guard, express.json({ limit: '4kb' }), (req, res) => {
     const { code, amount } = req.body || {};

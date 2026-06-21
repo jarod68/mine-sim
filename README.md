@@ -315,6 +315,7 @@ All routes require **HTTP Basic auth** (`admin` + the generated password).
 | `GET /admin` | — | The dashboard HTML page. |
 | `GET /admin/api/sessions` | — | `{ now, graceMs, activeCount, playerCount, active[], history[], events[] }` |
 | `POST /admin/api/credit` | `{ code, amount }` | `{ ok, code, credit }` · `404` unknown room · `400` bad amount |
+| `POST /admin/api/restore` | `{ code }` | Reactivate an **ended** game from its kept snapshot · `{ ok, code }` · `404` not restorable · `409` already live |
 
 A session summary contains `code, createdAt, ageMs, players, peakPlayers,
 totalJoins, credit, vehicleCount, assets, status`.
@@ -346,7 +347,8 @@ The WS/HTTP surface is hardened ([`server/`](server)):
 
 `/admin` (Basic auth) shows live and ended sessions with player counts, created/
 duration timestamps, **credit and asset breakdowns**, a **Join** link, **+100K /
-+500K** credit grants, and an activity log.
++500K** credit grants, a **↻ Restore** button to reactivate an ended game from its
+kept snapshot, and an activity log.
 
 ![Admin dashboard](docs/screenshots/admin.png)
 

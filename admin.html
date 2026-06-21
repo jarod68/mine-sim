@@ -43,6 +43,11 @@
     }
     .credit-btn:hover { background: #2a8c4d; }
     .credit-btn:disabled { opacity: .5; cursor: default; }
+    .restore-btn {
+      background: #3a6ea5; color: #fff; border: 0; border-radius: 5px;
+      padding: 3px 9px; font-size: 12px; cursor: pointer; white-space: nowrap;
+    }
+    .restore-btn:hover { background: #4a82c0; }
     .muted { color: #6f7682; }
     .log { max-height: 340px; overflow: auto; border: 1px solid #23262d; border-radius: 6px; }
     .log table { margin: 0; }
@@ -76,7 +81,7 @@
   <table>
     <thead><tr>
       <th>Code</th><th>Peak</th><th>Joins</th><th>Created</th><th>Ended</th>
-      <th>Duration</th><th>Final credit</th><th>Assets</th>
+      <th>Duration</th><th>Final credit</th><th>Assets</th><th></th>
     </tr></thead>
     <tbody id="history"></tbody>
   </table>
@@ -125,6 +130,19 @@
     }
     window.addCredit = addCredit;
 
+    async function restore(code) {
+      try {
+        const r = await fetch('/admin/api/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Restore failed: ' + (e.error || r.status)); }
+      } catch { /* transient */ }
+      refresh();
+    }
+    window.restore = restore;
+
     function render(d) {
       $('updated').textContent = 'updated ' + tm(d.now);
       $('s-active').textContent = d.activeCount;
@@ -154,7 +172,8 @@
           <td>${dur((s.endedAt || 0) - (s.createdAt || 0))}</td>
           <td class="money">${money(s.credit)}</td>
           <td class="assets">${assets(s.assets)}</td>
-        </tr>`).join('') : '<tr><td colspan="8" class="empty">No ended sessions yet.</td></tr>';
+          <td>${s.restorable ? `<button class="restore-btn" onclick="restore('${esc(s.code)}')">↻ Restore</button>` : ''}</td>
+        </tr>`).join('') : '<tr><td colspan="9" class="empty">No ended sessions yet.</td></tr>';
 
       $('events').innerHTML = d.events.length ? d.events.map((e) => `
         <tr>

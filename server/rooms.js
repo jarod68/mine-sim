@@ -151,12 +151,35 @@ class RoomManager {
         this.sessionLog.push(session);
         if (this.sessionLog.length > 300) this.sessionLog.shift();
         this.rooms.delete(code);
-        try { this.store?.deleteRoom(code); this.store?.appendSession(session); } catch { /* non-fatal */ }
+        // Keep the final snapshot (stamped ended) so an admin can restore it.
+        try { this.store?.archiveRoom(room, room.world.snapshotJson(), now); this.store?.appendSession(session); } catch { /* non-fatal */ }
         this.logEvent('reap', code);
         reaped.push(code);
       }
     }
     return reaped;
+  }
+
+  // Codes of ended rooms whose snapshot is still kept (i.e. restorable).
+  restorableCodes() { return new Set(this.store?.endedRoomCodes?.() || []); }
+
+  // Reactivate an ended room from its kept snapshot so players can rejoin its
+  // code. Returns { ok, code } or { error }.
+  restore(code) {
+    code = String(code || '').toUpperCase();
+    if (this.rooms.has(code)) return { error: 'already active' };
+    if (this.full()) return { error: 'server full' };
+    const data = this.store?.loadRoom?.(code);
+    if (!data) return { error: 'not found' };
+    const now = this.now();
+    this.rooms.set(code, {
+      code, world: this.WorldClass.fromSnapshot(data.snapshot), clients: new Set(),
+      emptySince: now, lastDebugStr: null, lastActivity: now,
+      createdAt: data.createdAt, peakClients: data.peakClients, totalJoins: data.totalJoins, dirty: true,
+    });
+    try { this.store.markRoomActive(code); } catch { /* non-fatal */ }
+    this.logEvent('restore', code);
+    return { ok: true, code };
   }
 }
 

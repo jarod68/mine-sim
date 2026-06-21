@@ -51,4 +51,27 @@ describe('persistence (SQLite)', () => {
     expect(inst.rooms.get(code)).toBeUndefined();
     await stop(inst);
   });
+
+  it('restores an ended (reaped) room from its kept snapshot', async () => {
+    const file = dbFile();
+    const inst = createServer({ adminPass: 'x', dbFile: file });
+    const room = inst.rooms.createRoom();
+    const code = room.code;
+    room.world.credit = 777000;
+    room.emptySince = Date.now() - inst.config.graceMs - 1000;        // overdue
+    inst.rooms.reapEmpty((r) => ({ code: r.code }));                  // archived (kept), not deleted
+
+    expect(inst.rooms.get(code)).toBeUndefined();                    // gone from the active set
+    expect(inst.rooms.restorableCodes().has(code)).toBe(true);       // but restorable
+
+    const r = inst.rooms.restore(code);
+    expect(r.ok).toBe(true);
+    const restored = inst.rooms.get(code);
+    expect(restored).toBeTruthy();
+    expect(restored.world.credit).toBe(777000);                      // world state recovered
+    expect(inst.rooms.restorableCodes().has(code)).toBe(false);      // no longer "ended"
+    expect(inst.rooms.restore(code).error).toBe('already active');   // can't double-restore
+
+    await stop(inst);
+  });
 });

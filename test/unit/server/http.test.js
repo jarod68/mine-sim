@@ -41,6 +41,24 @@ describe('HTTP — admin routes', () => {
       .send({ code: room.code, amount: 0 }).expect(400);
   });
 
+  it('restores an ended room; rejects unknown / already-live codes', async () => {
+    await request(inst.app).post('/admin/api/restore').send({ code: 'ZZZZZ' }).expect(401);   // auth required
+    await request(inst.app).post('/admin/api/restore').set('Authorization', AUTH).send({ code: 'ZZZZZ' }).expect(404);
+
+    const room = inst.rooms.createRoom();
+    const code = room.code;
+    room.emptySince = Date.now() - inst.config.graceMs - 1000;
+    inst.rooms.reapEmpty((r) => ({ code: r.code }));                         // archived, restorable
+
+    const s = await request(inst.app).get('/admin/api/sessions').set('Authorization', AUTH).expect(200);
+    expect(s.body.history.some((h) => h.code === code && h.restorable)).toBe(true);
+
+    const r = await request(inst.app).post('/admin/api/restore').set('Authorization', AUTH).send({ code }).expect(200);
+    expect(r.body.ok).toBe(true);
+    expect(inst.rooms.get(code)).toBeTruthy();
+    await request(inst.app).post('/admin/api/restore').set('Authorization', AUTH).send({ code }).expect(409); // already active
+  });
+
   it('serves the static client at /', async () => {
     const r = await request(inst.app).get('/').expect(200);
     expect(r.text).toContain('Mine Sim');

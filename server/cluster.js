@@ -49,10 +49,15 @@ function worker() {
   process.on('message', (m) => {
     if (!m || !m.t) return;
     if (m.t === 'admin-data') {
-      const data = buildAdminData({ rooms: inst.rooms.rooms, sessionLog: inst.rooms.sessionLog, eventLog: inst.rooms.eventLog, graceMs: inst.config.graceMs });
+      const data = buildAdminData({
+        rooms: inst.rooms.rooms, sessionLog: inst.rooms.sessionLog, eventLog: inst.rooms.eventLog,
+        graceMs: inst.config.graceMs, restorableCodes: inst.rooms.restorableCodes(),
+      });
       process.send({ t: 'reply', id: m.id, data });
     } else if (m.t === 'admin-credit') {
       process.send({ t: 'reply', id: m.id, data: grantCredit(inst, m.data) });
+    } else if (m.t === 'admin-restore') {
+      process.send({ t: 'reply', id: m.id, data: inst.rooms.restore((m.data || {}).code) });
     }
   });
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => inst.stop(() => process.exit(0)));
@@ -154,6 +159,21 @@ async function adminHandler(req, res, { ADMIN_PASS, workers, ask }) {
       if (i < 0) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'room not found' })); }
       const r = await ask(i, 'admin-credit', { code, amount });
       const status = r && r.ok ? 200 : r && r.error === 'room not found' ? 404 : 400;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(r || { error: 'timeout' }));
+    });
+    return undefined;
+  }
+  if (req.method === 'POST' && url.startsWith('/admin/api/restore')) {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', async () => {
+      let code;
+      try { ({ code } = JSON.parse(body || '{}')); } catch { /* bad json */ }
+      const i = code ? workerForCode(String(code), workers.length) : -1;
+      if (i < 0) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'not found' })); }
+      const r = await ask(i, 'admin-restore', { code });
+      const status = r && r.ok ? 200 : r && r.error === 'not found' ? 404 : 409;
       res.writeHead(status, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r || { error: 'timeout' }));
     });

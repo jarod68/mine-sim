@@ -87,7 +87,7 @@ function sessionSummary(room, now = Date.now()) {
 
 // The full payload for the admin page: live sessions, ended-session history, and
 // a recent activity log — newest first.
-function buildAdminData({ rooms, sessionLog = [], eventLog = [], graceMs = 0, now = Date.now() }) {
+function buildAdminData({ rooms, sessionLog = [], eventLog = [], graceMs = 0, now = Date.now(), restorableCodes = new Set() }) {
   const active = [];
   for (const room of rooms.values()) {
     const s = sessionSummary(room, now);
@@ -95,13 +95,18 @@ function buildAdminData({ rooms, sessionLog = [], eventLog = [], graceMs = 0, no
     active.push(s);
   }
   active.sort((a, b) => b.createdAt - a.createdAt);
+  // An ended session is restorable while its snapshot is still kept and the room
+  // isn't already live again.
+  const liveCodes = new Set(active.map((s) => s.code));
+  const history = sessionLog.slice(-200).reverse()
+    .map((s) => ({ ...s, restorable: restorableCodes.has(s.code) && !liveCodes.has(s.code) }));
   return {
     now,
     graceMs,
     activeCount: active.length,
     playerCount: active.reduce((n, s) => n + s.players, 0),
     active,
-    history: sessionLog.slice(-200).reverse(),
+    history,
     events: eventLog.slice(-200).reverse(),
   };
 }
