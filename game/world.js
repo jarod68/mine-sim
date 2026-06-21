@@ -123,7 +123,7 @@ class World {
     this.autopilot = new Autopilot(this.grid, this.roads, {
       getBlock: (bx, by) => this.mine.blocks[by]?.[bx],
       mineBlock: (bx, by, amount) => this._mineBlock(bx, by, amount),
-      deliver: (ore, tons) => this._deliver(ore, tons),
+      deliver: (ore, tons, crusherIdx) => this._deliver(ore, tons, crusherIdx),
     });
     this.autopilot.addShovel(hex1);
     this.autopilot.addShovel(hex2);
@@ -147,6 +147,7 @@ class World {
     this._lastVeh = new Map();    // id → last non-positional fields
     this._lastPos = new Map();    // id → last position signature
     this._lastCredit = null;
+    this._payouts = [];        // pending crusher "+$" payout pops to broadcast
     this._debug = new Set();   // labels with debug-path visualisation enabled
     this._gridDirty = true; this._gridJson = null;   // cached mine-grid JSON (persistence)
     this._occ = null;          // collision occupancy index (built each tick)
@@ -223,7 +224,7 @@ class World {
     this.autopilot = new Autopilot(this.grid, this.roads, {
       getBlock: (bx, by) => this.mine.blocks[by]?.[bx],
       mineBlock: (bx, by, amount) => this._mineBlock(bx, by, amount),
-      deliver: (ore, tons) => this._deliver(ore, tons),
+      deliver: (ore, tons, crusherIdx) => this._deliver(ore, tons, crusherIdx),
     });
     for (const v of this.vehicles) if (v.type === 'excavator') this.autopilot.addShovel(v);
     for (const [tl, sl] of snap.links || []) {
@@ -505,10 +506,16 @@ class World {
     return mined;
   }
 
-  _deliver(ore, tons) {
+  _deliver(ore, tons, crusherIdx) {
     const t = Math.max(0, Math.floor(Number(tons) || 0));
     const rate = ORE_VALUE[ore] || 0;
-    this.credit += Math.round(rate * t);
+    const amount = Math.round(rate * t);
+    this.credit += amount;
+    // Queue a floating "+$" pop over the crusher that received the load.
+    if (amount > 0) {
+      const cr = this.crushers[crusherIdx] || this.crushers[0];
+      if (cr) this._payouts.push({ gx: cr.x + cr.w / 2, gy: cr.y + cr.h / 2, amount });
+    }
   }
 
   // Admin grant: adjust the balance (never below 0). Returns the new credit.
@@ -739,6 +746,8 @@ class World {
     } else {
       v = new Vehicle({ type: 'pickup', label: this._nextLabel('LV'), gx: cell.gx, gy: cell.gy, len: zone * 0.95, wid: zone * 0.57 });
     }
+    // Trucks/LV spawn nose-up in their parking slot, neatly "en bataille".
+    if (item.type === 'oht' || item.type === 'pickup') v.heading = PARK_HEADING;
     v.place(this.grid);
     v.id = this.vehicles.length;          // stable id = append index
     this.vehicles.push(v);
@@ -787,9 +796,19 @@ class World {
     const P = PARKING;
     const occ = (gx, gy) => this.vehicles.some((v) => v.gx === gx && v.gy === gy);
     if (type === 'oht' || type === 'pickup') {
-      for (let gy = P.y; gy < P.y + P.h; gy++)
-        for (let gx = P.x; gx < P.x + P.w; gx++)
-          if (!occ(gx, gy)) return { gx, gy };
+      const pads = this.roads.parkings && this.roads.parkings.length ? this.roads.parkings : [P];
+      // Prefer a tidy "en bataille" slot — nose-up, ranks two cells apart so a
+      // truck's body clears the rank in front. A 3-tall pad holds two ranks; taller
+      // pads add more. A freshly-bought truck therefore spawns already well-parked.
+      for (const p of pads)
+        for (let gy = p.y; gy <= p.y + p.h - 1; gy += 2)
+          for (let gx = p.x; gx < p.x + p.w; gx++)
+            if (!occ(gx, gy)) return { gx, gy };
+      // Every rank slot taken → fall back to any free cell inside the pad.
+      for (const p of pads)
+        for (let gy = p.y; gy < p.y + p.h; gy++)
+          for (let gx = p.x; gx < p.x + p.w; gx++)
+            if (!occ(gx, gy)) return { gx, gy };
     }
     // A new shovel must keep ≥ SHOVEL_MIN_BLOCK_DIST blocks from every other
     // shovel, so two are never generated on top of one another.
@@ -937,9 +956,13 @@ class World {
     const creditChanged = this.credit !== this._lastCredit;
     this._lastCredit = this.credit;
 
-    if (!vehicles.length && !blocks.length && !creditChanged) return null;
+    const payouts = this._payouts.length ? this._payouts : null;
+    if (payouts) this._payouts = [];
+
+    if (!vehicles.length && !blocks.length && !creditChanged && !payouts) return null;
     const msg = { vehicles, blocks };
     if (creditChanged) msg.credit = this.credit;
+    if (payouts) msg.payouts = payouts;
     return msg;
   }
 

@@ -127,8 +127,11 @@ class Autopilot {
       // Productive only on an explored block that still has ore → keep mining.
       if (here && here.explored && here.ore && here.oreRemaining > 0) continue;
       // Otherwise relocate to the best EXPLORED ore block within 3 blocks, onto a
-      // sub-zone where the shovel's body clears every surrounding road.
-      const next = this._bestOreInRadius(shovel, bx, by, 3);
+      // sub-zone where the shovel's body clears every surrounding road. If no fully
+      // road-clear spot exists nearby (shovel hemmed in by roads), relax the
+      // constraint so it still moves to ore and keeps working instead of stalling.
+      const next = this._bestOreInRadius(shovel, bx, by, 3, false)
+                || this._bestOreInRadius(shovel, bx, by, 3, true);
       if (next) this._shovelMove.set(shovel, next.place);
     }
   }
@@ -142,36 +145,43 @@ class Autopilot {
     return false;
   }
 
-  // True when the shovel's whole graphic footprint, centred on cell (gx,gy), stays
-  // in bounds and clears every road cell — so it never parks straddling a road.
-  _footprintRoadFree(shovel, gx, gy) {
+  // How many cells of the shovel's graphic footprint, centred on (gx,gy), sit on a
+  // road. Infinity if the footprint would leave the map. 0 means it clears every
+  // road — so we never *prefer* parking straddling a road, but can fall back to it.
+  _footprintRoadCount(shovel, gx, gy) {
+    let n = 0;
     for (const c of shovel.footprintAt(gx, gy, this.grid)) {
-      if (c.gx < 0 || c.gy < 0 || c.gx >= this.grid.zoneCols || c.gy >= this.grid.zoneRows) return false;
-      if (this.roads.isRoad(c.gx, c.gy)) return false;
+      if (c.gx < 0 || c.gy < 0 || c.gx >= this.grid.zoneCols || c.gy >= this.grid.zoneRows) return Infinity;
+      if (this.roads.isRoad(c.gx, c.gy)) n++;
     }
-    return true;
+    return n;
   }
 
-  // A sub-zone of block (bx,by) where the shovel can sit without its body
-  // overlapping any road. Prefers the cell matching its current parity. Null if
-  // every sub-zone would straddle a road. Returns { gx, gy }.
-  _shovelPlacement(shovel, bx, by) {
+  // A sub-zone of block (bx,by) where the shovel can sit. Prefers the cell matching
+  // its current parity, and a body that fully clears every road. When `relaxed`,
+  // falls back to the in-bounds sub-zone with the *fewest* road cells (so a shovel
+  // boxed in by roads still relocates and keeps working rather than idling). Returns
+  // { gx, gy } | null.
+  _shovelPlacement(shovel, bx, by, relaxed = false) {
     const xs = (shovel.gx % 2) === 0 ? [0, 1] : [1, 0];
     const ys = (shovel.gy % 2) === 0 ? [0, 1] : [1, 0];
+    let fallback = null, fewest = Infinity;
     for (const oy of ys)
       for (const ox of xs) {
         const gx = bx * 2 + ox;
         const gy = by * 2 + oy;
-        if (this._footprintRoadFree(shovel, gx, gy)) return { gx, gy };
+        const roads = this._footprintRoadCount(shovel, gx, gy);
+        if (roads === 0) return { gx, gy };                        // body fully off the roads
+        if (relaxed && roads < fewest) { fewest = roads; fallback = { gx, gy }; }
       }
-    return null;
+    return relaxed ? fallback : null;
   }
 
   // Best EXPLORED ore block within `R` blocks (Chebyshev) of (bx,by) for `shovel`
   // to move to. Never reveals undrilled ground, never a block on a road, and only
   // blocks where a road-clear placement exists for this shovel's body. Priority:
   // road access first, then nearest, then richest. Returns { bx, by, place } | null.
-  _bestOreInRadius(shovel, bx, by, R) {
+  _bestOreInRadius(shovel, bx, by, R, relaxed = false) {
     let best = null;
     for (let dy = -R; dy <= R; dy++) {
       for (let dx = -R; dx <= R; dx++) {
@@ -180,8 +190,8 @@ class Autopilot {
         const nby = by + dy;
         const b = this.hooks.getBlock(nbx, nby);
         if (!(b && b.explored && b.ore && b.oreRemaining > 0)) continue;
-        if (this._blockOnRoad(nbx, nby)) continue;       // never sit on a road
-        const place = this._shovelPlacement(shovel, nbx, nby);
+        if (!relaxed && this._blockOnRoad(nbx, nby)) continue;   // strict: never sit on a road
+        const place = this._shovelPlacement(shovel, nbx, nby, relaxed);
         if (!place) continue;                            // body would straddle a road
         const hasRoad = this._bayCells(nbx * 2, nby * 2, nbx * 2 + 1, nby * 2 + 1).size > 0;
         const dist = Math.max(Math.abs(dx), Math.abs(dy));
@@ -669,7 +679,7 @@ class Autopilot {
     truck.task = { kind: 'dump', progress };
     truck.load = st.dumpTotal * (1 - progress);
     if (st.timer >= DUMP_TIME) {
-      if (st.dumpTotal > 0) this.hooks.deliver(st.dumpOre, st.dumpTotal);
+      if (st.dumpTotal > 0) this.hooks.deliver(st.dumpOre, st.dumpTotal, st.crusherIdx);
       this._unlockCrusher(st.crusherIdx, truck);
       truck.load = 0; truck.loadOre = null; truck.task = null;
       st.dumpTotal = null; st.dumpOre = null; st.crusherIdx = null;

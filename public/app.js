@@ -14,6 +14,7 @@ const creditEl = document.getElementById('credit');
 const assetEl = document.getElementById('asset-details');
 const popup = new BlockPopup(document.getElementById('popup'));
 const shopEl = document.getElementById('shop');
+let setMode = () => {};   // assigned by setupModes(); lets other code switch tool mode
 
 const net = new Net();
 let game;
@@ -133,7 +134,7 @@ function setupModes() {
     erase: document.getElementById('mode-erase'),
   };
   const tool = { mouse: 'none', road: 'draw', erase: 'erase' };
-  const setMode = (mode) => {
+  setMode = (mode) => {
     roads.setTool(tool[mode]);
     if (mode !== 'mouse') closeParkResize();   // resize handles only live in Mouse mode
     for (const [m, btn] of Object.entries(btns)) btn.classList.toggle('active', m === mode);
@@ -400,6 +401,7 @@ function onLive(data) {
     invalidateMine();   // redraw at most once next frame, not synchronously per delta
   }
   if ('debug' in data) fleet.debugPaths = data.debug;
+  if (data.payouts) for (const p of data.payouts) fleet.addPayout(p.gx, p.gy, p.amount);
   updateAssetLive();
 }
 
@@ -584,7 +586,7 @@ function updateAssetLive() {
 // ── Shop (buy assets) ──
 const money = (n) => `$${n.toLocaleString('en-US')}`;
 
-function openShop() { shopEl.hidden = false; renderShop(); }
+function openShop() { setMode('mouse'); shopEl.hidden = false; renderShop(); }
 function closeShop() { shopEl.hidden = true; }
 
 function renderShop() {

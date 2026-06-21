@@ -461,6 +461,19 @@ describe('World — shop, assignment, manual control', () => {
     expect(w.buyAsset('NOPE').error).toBe('unknown');
   });
 
+  it('spawns a bought T264 already parked "en bataille" (nose-up, on a rank slot)', () => {
+    const parkHeading = w.vehicles.find((v) => v.type === 'oht').heading;   // default fleet is parked
+    const r = w.buyAsset('T264');
+    const t = w.byLabel.get(r.label);
+    expect(t.type).toBe('oht');
+    expect(t.moving).toBe(false);
+    expect(t.heading).toBe(parkHeading);                  // nose-up like the rest of the fleet
+    const pad = w.roads.parkings[0];
+    expect((t.gy - pad.y) % 2).toBe(0);                   // sits on a rank row, not the aisle
+    expect(t.gx).toBeGreaterThanOrEqual(pad.x);
+    expect(t.gx).toBeLessThan(pad.x + pad.w);
+  });
+
   it('buys a PR776 track dozer (off-road, ~R9400 proportions)', () => {
     w.credit = 1000000;
     const r = w.buyAsset('PR776');
@@ -579,6 +592,18 @@ describe('World — collisions & live deltas', () => {
     w.credit += 500;
     const d = w.liveDelta();
     expect(d.credit).toBe(w.credit);
+  });
+
+  it('emits a crusher "+$" payout pop on delivery, then clears it', () => {
+    w.liveDelta();                       // drain the initial frame
+    w._deliver('iron', 240, 0);          // one truckload of iron at crusher 0 = $10,000
+    const d = w.liveDelta();
+    expect(d.payouts).toHaveLength(1);
+    expect(d.payouts[0].amount).toBe(10000);
+    const cr = w.crushers[0];
+    expect(d.payouts[0].gx).toBeCloseTo(cr.x + cr.w / 2, 5);
+    expect(d.payouts[0].gy).toBeCloseTo(cr.y + cr.h / 2, 5);
+    expect(w.liveDelta()).toBeNull();    // payout consumed, nothing left to send
   });
 
   it('setRoads invalidates the autopilot path caches', () => {
