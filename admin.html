@@ -209,7 +209,10 @@
     // ── chart (SVG: created bars + live-players line) ──
     function renderChart() {
       const data = (DATA.metrics && DATA.metrics[ui.range]) || [];
-      const W = 760, H = 150, pad = { l: 26, r: 10, t: 8, b: 20 };
+      const el = $('chart');
+      // Render at the container's real pixel width (1:1, no stretch) — a fixed
+      // viewBox scaled with preserveAspectRatio="none" was distorting everything.
+      const W = Math.max(320, Math.floor(el.clientWidth || 760)), H = 150, pad = { l: 30, r: 12, t: 12, b: 22 };
       const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b, n = Math.max(1, data.length);
       const maxC = Math.max(1, ...data.map((d) => d.created));
       const maxP = Math.max(1, ...data.map((d) => d.players));
@@ -221,7 +224,7 @@
         ? new Date(t).getHours() + 'h'
         : new Date(t).toLocaleDateString(undefined, { weekday: 'short' });
       const every = ui.range === 'day' ? 3 : 1;
-      let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" font-family="system-ui">`;
+      let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="system-ui" style="display:block">`;
       svg += `<line x1="${pad.l}" y1="${pad.t + ih}" x2="${W - pad.r}" y2="${pad.t + ih}" stroke="#2a2e36"/>`;
       data.forEach((d, i) => {
         const h = pad.t + ih - yC(d.created);
@@ -308,6 +311,7 @@
     const setRange = (r) => { ui.range = r; $('r-day').classList.toggle('on', r === 'day'); $('r-week').classList.toggle('on', r === 'week'); renderChart(); };
     $('r-day').addEventListener('click', () => setRange('day'));
     $('r-week').addEventListener('click', () => setRange('week'));
+    let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(renderChart, 120); });
 
     refresh();
     setInterval(refresh, 3000);
