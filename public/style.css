@@ -17,8 +17,10 @@ body {
   max-width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: flex-start;
+  flex-wrap: wrap;            /* wrap onto more rows instead of clipping content */
+  row-gap: 10px;
+  column-gap: 14px;
 }
 
 /* Every top-bar button shares one size & shape (uniform height, padding, font),
@@ -54,6 +56,8 @@ body {
 /* ── Asset details (top-left) ── */
 .asset {
   width: max-content;        /* width adapts to the content */
+  max-width: 100%;
+  flex-shrink: 0;            /* keep its text in full — never squeezed/clipped */
   box-sizing: border-box;
   display: flex;
   align-items: center;
