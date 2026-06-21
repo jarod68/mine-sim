@@ -6,7 +6,7 @@ const { roomBroadcast } = require('./transport');
 const { sessionSummary } = require('../admin');
 
 function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000, reapMs = 60000, persistMs = 15000,
-  idleEvery = 6, idleActiveMs = 1500, log = console }) {
+  metricsMs = 60000, idleEvery = 6, idleActiveMs = 1500, log = console }) {
   const dt = 1 / tickHz;
   let tickN = 0;
 
@@ -68,8 +68,14 @@ function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000
     try { rooms.saveDirty(); } catch (err) { log.error('[persist] error:', err); }
   }, persistMs);
 
+  // Periodic load sample (active rooms + live players + games created) for the
+  // admin charts.
+  const metrics = setInterval(() => {
+    try { rooms.sampleMetrics(); } catch (err) { log.error('[metrics] error:', err); }
+  }, metricsMs);
+
   return {
-    stop() { clearInterval(tick); clearInterval(heartbeat); clearInterval(reaper); clearInterval(persist); },
+    stop() { clearInterval(tick); clearInterval(heartbeat); clearInterval(reaper); clearInterval(persist); clearInterval(metrics); },
   };
 }
 

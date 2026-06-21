@@ -52,6 +52,7 @@ function worker() {
       const data = buildAdminData({
         rooms: inst.rooms.rooms, sessionLog: inst.rooms.sessionLog, eventLog: inst.rooms.eventLog,
         graceMs: inst.config.graceMs, restorableCodes: inst.rooms.restorableCodes(),
+        metricsRows: inst.rooms.store?.metricsSince(Date.now() - 8 * 24 * 3600 * 1000) || [],
       });
       process.send({ t: 'reply', id: m.id, data });
     } else if (m.t === 'admin-credit') {
@@ -194,7 +195,24 @@ function mergeAdmin(parts) {
     now: Date.now(), graceMs: parts[0]?.graceMs || 0,
     activeCount: active.length, playerCount: active.reduce((n, s) => n + s.players, 0),
     active, history, events,
+    metrics: mergeMetrics(parts.map((p) => p.metrics)),
   };
+}
+
+// Sum per-worker metric buckets by timestamp (created/players/rooms add up across
+// workers — each owns a disjoint set of rooms). Buckets are clock-aligned so they
+// line up across workers.
+function mergeMetrics(series) {
+  const merge = (key) => {
+    const by = new Map();
+    for (const s of series) for (const b of (s?.[key] || [])) {
+      const cur = by.get(b.t) || { t: b.t, created: 0, players: 0, rooms: 0 };
+      cur.created += b.created; cur.players += b.players; cur.rooms += b.rooms;
+      by.set(b.t, cur);
+    }
+    return [...by.values()].sort((a, b) => a.t - b.t);
+  };
+  return { day: merge('day'), week: merge('week') };
 }
 
 // ── helpers ──

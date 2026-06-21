@@ -30,6 +30,7 @@ class RoomManager {
     this.shard = shard;              // { id, count } in cluster mode — owns codes routed to it
     this.sessionLog = [];            // ended-session summaries (bounded)
     this.eventLog = [];              // recent activity entries (bounded)
+    this._created = 0;               // rooms created since the last metrics sample
   }
 
   get size() { return this.rooms.size; }
@@ -108,8 +109,19 @@ class RoomManager {
       createdAt: now, peakClients: 0, totalJoins: 0, dirty: true,
     };
     this.rooms.set(room.code, room);
+    this._created += 1;
     this.logEvent('create', room.code);
     return room;
+  }
+
+  // Periodic snapshot of load for the admin charts: current active rooms + live
+  // players + games created since the last sample (reset each call).
+  sampleMetrics() {
+    if (!this.store) return;
+    let players = 0;
+    for (const r of this.rooms.values()) players += r.clients.size;
+    const created = this._created; this._created = 0;
+    try { this.store.appendMetric(this.now(), this.rooms.size, players, created); } catch { /* non-fatal */ }
   }
 
   // Mark a room's world as changed (a command arrived): persist it on the next

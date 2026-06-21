@@ -21,6 +21,7 @@ function adminRouter({ rooms, adminUser, adminPass, graceMs }) {
     res.json(buildAdminData({
       rooms: rooms.rooms, sessionLog: rooms.sessionLog, eventLog: rooms.eventLog, graceMs,
       restorableCodes: rooms.restorableCodes(),
+      metricsRows: rooms.store?.metricsSince(Date.now() - 8 * 24 * 3600 * 1000) || [],
     })));
 
   // Reactivate an ended game from its kept snapshot.

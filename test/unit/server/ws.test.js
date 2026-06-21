@@ -72,11 +72,13 @@ describe('WS — integration', () => {
     const c = collect(ws);
     ws.on('open', () => ws.send(JSON.stringify({ t: 'create' })));
     const joined = await c.wait('joined');
-    ws.send(JSON.stringify({ t: 'roads', cells: [{ gx: 9e8, gy: 9e8 }, { gx: 60, gy: 60, dir: { dx: 1, dy: 0 } }] }));
+    // (20,20) → block (10,10), inside the spawn keep-out, so it's never an
+    // un-prepared vein cell (which setRoads would also legitimately drop).
+    ws.send(JSON.stringify({ t: 'roads', cells: [{ gx: 9e8, gy: 9e8 }, { gx: 20, gy: 20, dir: { dx: 1, dy: 0 } }] }));
     await new Promise((r) => setTimeout(r, 80));
     const room = inst.rooms.get(joined.room);
     expect(room.world.roads.serialize().some((cc) => cc.gx === 9e8)).toBe(false);
-    expect(room.world.roads.serialize().some((cc) => cc.gx === 60 && cc.gy === 60)).toBe(true);
+    expect(room.world.roads.serialize().some((cc) => cc.gx === 20 && cc.gy === 20)).toBe(true);
     ws.close();
   });
 

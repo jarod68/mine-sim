@@ -25,6 +25,10 @@ class Store {
       CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT, ended_at INTEGER, data TEXT
       );
+      CREATE TABLE IF NOT EXISTS metrics (
+        at INTEGER, rooms INTEGER, players INTEGER, created INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS metrics_at ON metrics (at);
     `);
     // Migrate older DBs that predate the `ended_at` column (ended rooms kept for
     // admin restore instead of being deleted).
@@ -57,6 +61,9 @@ class Store {
     this._insSession = this.db.prepare('INSERT INTO sessions (ended_at, data) VALUES (?, ?)');
     this._recentSessions = this.db.prepare('SELECT data FROM sessions ORDER BY id DESC LIMIT ?');
     this._trimSessions = this.db.prepare('DELETE FROM sessions WHERE id <= (SELECT MAX(id) FROM sessions) - ?');
+    this._insMetric = this.db.prepare('INSERT INTO metrics (at, rooms, players, created) VALUES (?, ?, ?, ?)');
+    this._metricsSince = this.db.prepare('SELECT at, rooms, players, created FROM metrics WHERE at >= ? ORDER BY at');
+    this._trimMetrics = this.db.prepare('DELETE FROM metrics WHERE at < ?');
   }
 
   // ── rooms ──
@@ -122,11 +129,16 @@ class Store {
   appendSession(s) { this._insSession.run(s.endedAt ?? Date.now(), JSON.stringify(s)); }
   recentSessions(n) { return this._recentSessions.all(n).reverse().map((r) => JSON.parse(r.data)); }
 
-  trim(maxEvents = 5000, maxSessions = 2000, maxEnded = 200) {
+  // ── metrics (periodic samples for the admin charts) ──
+  appendMetric(at, rooms, players, created) { this._insMetric.run(at, rooms, players, created); }
+  metricsSince(since) { return this._metricsSince.all(since); }
+
+  trim(maxEvents = 5000, maxSessions = 2000, maxEnded = 200, metricsMaxAgeMs = 8 * 24 * 3600 * 1000) {
     try {
       this._trimEvents.run(maxEvents);
       this._trimSessions.run(maxSessions);
       this._trimEnded.run(maxEnded);          // bound the kept (restorable) ended rooms
+      this._trimMetrics.run(Date.now() - metricsMaxAgeMs);
     } catch { /* ignore */ }
   }
   close() { try { this.db.close(); } catch { /* already closed */ } }

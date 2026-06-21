@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { genPassword, loadOrCreateAdminPass, readEnvVar, safeEqual, checkAuth, sessionSummary, buildAdminData } from '../../../admin.js';
+import { genPassword, loadOrCreateAdminPass, readEnvVar, safeEqual, checkAuth, sessionSummary, buildAdminData, buildMetrics } from '../../../admin.js';
 
 const basic = (u, p) => 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64');
 
@@ -112,5 +112,40 @@ describe('admin — session snapshot', () => {
     expect(d.active[0].status).toBe('idle');
     expect(d.history[0].code).toBe('OLD01');
     expect(d.events[0].type).toBe('create');
+  });
+});
+
+describe('admin — metrics buckets', () => {
+  const H = 3600000, D = 86400000;
+  const now = 1_700_000_000_000;   // fixed reference
+
+  it('buckets into 24 hourly + 7 daily clock-aligned slots, peak/sum aggregated', () => {
+    const rows = [
+      { at: now, rooms: 3, players: 5, created: 1 },
+      { at: now - 2 * H, rooms: 2, players: 8, created: 2 },
+      { at: now - 2 * H + 60000, rooms: 4, players: 3, created: 1 },   // same hour as above
+      { at: now - 5 * D, rooms: 1, players: 2, created: 4 },
+      { at: now - 30 * D, rooms: 9, players: 9, created: 9 },          // older than a week → dropped
+    ];
+    const m = buildMetrics(rows, now);
+    expect(m.day).toHaveLength(24);
+    expect(m.week).toHaveLength(7);
+
+    const last = m.day[m.day.length - 1];
+    expect(last.created).toBe(1);
+    expect(last.players).toBe(5);
+
+    const twoAgo = m.day[m.day.length - 3];
+    expect(twoAgo.created).toBe(3);          // 2 + 1 summed
+    expect(twoAgo.players).toBe(8);          // peak
+    expect(twoAgo.rooms).toBe(4);
+
+    expect(m.week.some((b) => b.created === 4)).toBe(true);   // 5-day-old sample
+    expect(m.week.every((b) => b.created !== 9)).toBe(true);  // 30-day-old excluded
+  });
+
+  it('handles no rows', () => {
+    const m = buildMetrics([], now);
+    expect(m.day.every((b) => b.created === 0 && b.players === 0)).toBe(true);
   });
 });

@@ -85,9 +85,32 @@ function sessionSummary(room, now = Date.now()) {
   };
 }
 
-// The full payload for the admin page: live sessions, ended-session history, and
-// a recent activity log — newest first.
-function buildAdminData({ rooms, sessionLog = [], eventLog = [], graceMs = 0, now = Date.now(), restorableCodes = new Set() }) {
+// Bucket periodic load samples into fixed, CLOCK-ALIGNED buckets (so a cluster can
+// merge per-worker series by timestamp): 24 hourly buckets for the day chart and 7
+// daily buckets for the week chart. created = sum, players/rooms = peak per bucket.
+function buildMetrics(rows = [], now = Date.now()) {
+  const H = 3600000, D = 86400000;
+  const bucketize = (step, count) => {
+    const end = Math.floor(now / step) * step;          // current bucket start
+    const start = end - (count - 1) * step;
+    const out = [];
+    for (let t = start; t <= end; t += step) out.push({ t, created: 0, players: 0, rooms: 0 });
+    for (const r of rows) {
+      if (r.at < start) continue;
+      const i = Math.round((Math.floor(r.at / step) * step - start) / step);
+      if (i < 0 || i >= out.length) continue;
+      out[i].created += r.created || 0;
+      out[i].players = Math.max(out[i].players, r.players || 0);
+      out[i].rooms = Math.max(out[i].rooms, r.rooms || 0);
+    }
+    return out;
+  };
+  return { day: bucketize(H, 24), week: bucketize(D, 7) };
+}
+
+// The full payload for the admin page: live sessions, ended-session history, a
+// recent activity log, and bucketed load metrics — newest first.
+function buildAdminData({ rooms, sessionLog = [], eventLog = [], graceMs = 0, now = Date.now(), restorableCodes = new Set(), metricsRows = [] }) {
   const active = [];
   for (const room of rooms.values()) {
     const s = sessionSummary(room, now);
@@ -108,7 +131,8 @@ function buildAdminData({ rooms, sessionLog = [], eventLog = [], graceMs = 0, no
     active,
     history,
     events: eventLog.slice(-200).reverse(),
+    metrics: buildMetrics(metricsRows, now),
   };
 }
 
-module.exports = { genPassword, loadOrCreateAdminPass, readEnvVar, safeEqual, checkAuth, sessionSummary, buildAdminData };
+module.exports = { genPassword, loadOrCreateAdminPass, readEnvVar, safeEqual, checkAuth, sessionSummary, buildAdminData, buildMetrics };

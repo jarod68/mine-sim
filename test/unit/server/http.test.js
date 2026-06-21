@@ -59,6 +59,17 @@ describe('HTTP — admin routes', () => {
     await request(inst.app).post('/admin/api/restore').set('Authorization', AUTH).send({ code }).expect(409); // already active
   });
 
+  it('reports bucketed load metrics in the sessions payload', async () => {
+    inst.rooms.createRoom();
+    inst.rooms.sampleMetrics();                         // one sample: 1 room, 1 created
+    const r = await request(inst.app).get('/admin/api/sessions').set('Authorization', AUTH).expect(200);
+    expect(r.body.metrics.day).toHaveLength(24);
+    expect(r.body.metrics.week).toHaveLength(7);
+    const cur = r.body.metrics.day[23];                 // current hour
+    expect(cur.created).toBeGreaterThanOrEqual(1);
+    expect(cur.rooms).toBeGreaterThanOrEqual(1);
+  });
+
   it('serves the static client at /', async () => {
     const r = await request(inst.app).get('/').expect(200);
     expect(r.text).toContain('Mine Sim');
