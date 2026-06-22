@@ -25,6 +25,7 @@ let drillCost = 5000;
 let blockW = 0;
 let blockH = 0;
 let built = false;
+let testMode = false;        // server TEST_MODE → 'P' forces a test breakdown
 let creditValue = 0;
 let catalog = [];
 let maxAssets = 150;
@@ -189,6 +190,7 @@ function flushRoadsSave() {
 // ── first full state → build everything once ──
 function build(state) {
   built = true;
+  testMode = !!state.testMode;   // enables the 'P' test-breakdown key
   paintLegend();
   drillCost = state.drillCost;
   catalog = state.catalog || [];
@@ -406,8 +408,15 @@ function onLive(data) {
   if ('debug' in data) fleet.debugPaths = data.debug;
   if (data.payouts) for (const p of data.payouts) fleet.addPayout(p.gx, p.gy, p.amount);
   if (data.roads && roads) roads.applyWear(data.roads);
+  if (data.breakdowns) for (const b of data.breakdowns) onBreakdown(b);
   updateAssetLive();
   updateAssetListLive();
+}
+
+// An asset just broke down: alert the player with a popup that points the camera at it.
+function onBreakdown(b) {
+  const kind = b.type === 'excavator' ? 'Shovel' : 'Haul truck';
+  showBreakdownPopup(`⚠️ ${kind} ${b.label} broke down — send a light vehicle (LV) alongside it to repair.`, b);
 }
 
 // ── Camera: scroll to zoom, right-drag to pan ──
@@ -509,6 +518,12 @@ function setupCamera() {
 }
 
 // ── Asset details panel (top-left) — compact, fields side by side ──
+// Short status string for a breakable asset (truck / shovel), or null when running.
+function assetStatusText(v) {
+  if (!v.broken) return null;
+  return v.repair > 0 ? `🔧 Repairing ${Math.round(v.repair * 100)}%` : '⚠️ Broken down';
+}
+
 function renderAsset(v) {
   markAssetListSelection();   // keep the fleet panel's highlight in sync with the selection
   if (!v) {
@@ -518,6 +533,12 @@ function renderAsset(v) {
 
   const item = (label, val) => `<span class="ai"><i>${label}</i><b>${val}</b></span>`;
   const parts = [item('Model', v.model), item('Name', v.label)];
+
+  // Breakdown status (trucks & shovels) — flagged red so it's unmissable.
+  if (v.type === 'oht' || v.type === 'excavator') {
+    const st = assetStatusText(v);
+    parts.push(`<span class="ai${st ? ' ai-broken' : ''}" id="asset-status-wrap"><i>Status</i><b id="asset-status">${st || 'OK'}</b></span>`);
+  }
 
   if (v.type === 'oht') {
     const shovels = fleet.vehicles.filter((x) => x.type === 'excavator');
@@ -589,6 +610,7 @@ window.addEventListener('keydown', (e) => {
   if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
   if (e.key === 'w' || e.key === 'W') moveMode ? exitMoveMode() : enterMoveMode();
   else if (e.key === 'Escape') { exitMoveMode(); exitCrusherPlace(); }
+  else if ((e.key === 'p' || e.key === 'P') && testMode && !e.repeat) net.breakdown();   // test breakdown
 });
 
 // ── Crusher placement mode ──
@@ -616,6 +638,28 @@ function showHint(text) {
   hintEl.hidden = false;
 }
 function hideHint() { if (hintEl) hintEl.hidden = true; }
+
+// ── Breakdown alert popup (top-centre, auto-dismiss, with a Locate button) ──
+let breakdownEl = null;
+let breakdownTimer = null;
+function showBreakdownPopup(text, asset) {
+  if (!breakdownEl) {
+    breakdownEl = document.createElement('div');
+    breakdownEl.className = 'breakdown-alert';
+    document.querySelector('main').appendChild(breakdownEl);
+  }
+  breakdownEl.innerHTML = `<span class="bd-text"></span><button class="bd-locate">📍 Locate</button><button class="bd-close" aria-label="Close">×</button>`;
+  breakdownEl.querySelector('.bd-text').textContent = text;
+  breakdownEl.querySelector('.bd-locate').addEventListener('click', () => {
+    const v = asset && fleet?.byLabel.get(asset.label);
+    if (v) { fleet.setSelected(v); flyTo(v.x, v.y); }
+  });
+  breakdownEl.querySelector('.bd-close').addEventListener('click', hideBreakdown);
+  breakdownEl.hidden = false;
+  clearTimeout(breakdownTimer);
+  breakdownTimer = setTimeout(hideBreakdown, 9000);
+}
+function hideBreakdown() { if (breakdownEl) breakdownEl.hidden = true; }
 
 // ── Left fleet panel: a comparable list of every asset, with a locate button ──
 const assetListEl = document.getElementById('asset-list');
@@ -674,6 +718,12 @@ function assetTrucksFor(label) {
 
 // The comparable stat cell for a row — live fields get a class so they can be
 // updated in place without rebuilding the whole list.
+// The broken/repairing badge shown on a fleet-panel row (empty when running).
+function brokenBadge(v) {
+  if (!v.broken) return '';
+  return v.repair > 0 ? `🔧 ${Math.round(v.repair * 100)}%` : '⚠️';
+}
+
 function assetStatsHTML(v) {
   if (v.type === 'oht')
     return `<b class="al-load">${Math.round(v.load)}</b>/${v.payload}t · ⛏<span class="al-asg">${v.shovel || '—'}</span>`;
@@ -693,9 +743,9 @@ function renderAssetList() {
     if (!list.length) continue;
     html += `<div class="al-group">${title} · ${list.length}</div>`;
     for (const v of list) {
-      html += `<div class="al-row${v.label === sel ? ' sel' : ''}" data-label="${v.label}">`
+      html += `<div class="al-row${v.label === sel ? ' sel' : ''}${v.broken ? ' broken' : ''}" data-label="${v.label}">`
         + `<span class="al-icon">${assetSvg(v.type)}</span>`
-        + `<div class="al-main"><div class="al-name">${v.label}<span class="al-model">${shortModel(v.model)}</span></div>`
+        + `<div class="al-main"><div class="al-name">${v.label}<span class="al-model">${shortModel(v.model)}</span><span class="al-broken">${brokenBadge(v)}</span></div>`
         + `<div class="al-stats">${assetStatsHTML(v)}</div></div>`
         + `<button class="al-locate" title="Centre the camera on this asset" data-label="${v.label}">📍</button>`
         + '</div>';
@@ -717,6 +767,9 @@ function updateAssetListLive() {
     if (asg) asg.textContent = v.shovel || '—';
     const trk = row.querySelector('.al-trucks');
     if (trk) trk.textContent = assetTrucksFor(v.label);
+    row.classList.toggle('broken', !!v.broken);
+    const bb = row.querySelector('.al-broken');
+    if (bb) bb.textContent = brokenBadge(v);
   }
 }
 
@@ -755,6 +808,12 @@ assetListBody.addEventListener('click', (e) => {
 function updateAssetLive() {
   const v = fleet.selected;
   if (!v) return;
+  const statusEl = document.getElementById('asset-status');
+  if (statusEl) {
+    const st = assetStatusText(v);
+    statusEl.textContent = st || 'OK';
+    document.getElementById('asset-status-wrap').classList.toggle('ai-broken', !!st);
+  }
   if (v.type === 'oht') {
     const c = document.getElementById('asset-carry');
     if (c) c.textContent = `${Math.round(v.load)} t`;

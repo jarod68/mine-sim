@@ -21,6 +21,8 @@ First run needs the browser once: `npx playwright install chromium`.
 - `roads` — one-way lane markings, divided lanes, a junction, and a degraded
   (dark / hatched) worn stretch.
 - `parking-crusher` — a parking pad + crusher building linked by road.
+- `breakdown` — a broken-down asset (smoke + ⚠ badge) and one being repaired
+  (green progress ring + spinning wrench).
 - `seed-map` — the default map's **vein layout** for a fixed seed. The spec
   generates it in Node (`generateMine(…, seed)`) and injects the significant
   blocks into the page via `addInitScript`. Roads / crushers / fleet use unseeded

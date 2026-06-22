@@ -42,6 +42,8 @@ export class Vehicle {
     this.digging = d.digging;
     this.manual = d.manual;
     this.shovel = d.shovel;
+    this.broken = d.broken ?? false;      // seized up → frozen, smoking
+    this.repair = d.repair ?? 0;          // 0..1 repair progress while a LV tends it
     this.prepLine = d.prepLine ?? null;   // dozer sweep line "y,x0,x1,dir" or null
   }
 
@@ -65,6 +67,8 @@ export class Vehicle {
     if ('digging' in d) this.digging = d.digging;
     if ('manual' in d) this.manual = d.manual;
     if ('shovel' in d) this.shovel = d.shovel;
+    if ('broken' in d) this.broken = d.broken;
+    if ('repair' in d) this.repair = d.repair;
     if ('prepLine' in d) this.prepLine = d.prepLine;
   }
 
@@ -129,6 +133,8 @@ export class Vehicle {
       ctx.fillRect(bx, by, bw * Math.max(0, Math.min(1, this.task.progress)), bh);
     }
 
+    if (this.broken) this._drawBreakdown(ctx);
+
     // label — kept upright above the vehicle
     ctx.fillStyle = selected ? '#ffd83b' : 'rgba(255, 255, 255, 0.9)';
     ctx.font = 'bold 10px system-ui';
@@ -137,6 +143,45 @@ export class Vehicle {
     ctx.fillText(this.label, 0, -this.selR - (this.task ? 15 : 5));
 
     ctx.restore();
+  }
+
+  // Broken-down overlay (upright, in the vehicle's local frame): rising black smoke
+  // puffs, and — while a light vehicle is repairing it — a spinning wrench + a green
+  // progress ring.
+  _drawBreakdown(ctx) {
+    const t = performance.now() / 1000;
+    const r = this.selR;
+    // black smoke: three puffs rising and fading on staggered phases
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * 0.9 + i / 3) % 1;             // 0→1 life of this puff
+      const py = -r * 0.5 - ph * (r * 2.2);
+      const px = Math.sin((t + i) * 2.2) * r * 0.3;
+      const rad = r * (0.32 + ph * 0.5);
+      ctx.globalAlpha = (1 - ph) * 0.55;
+      ctx.fillStyle = i === 0 ? '#3a3a3a' : '#111111';
+      ctx.beginPath(); ctx.arc(px, py, rad, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    if (this.repair > 0) {
+      // green progress ring under the asset
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, r + 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#36c07a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, r + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.repair)); ctx.stroke();
+      // spinning wrench glyph
+      ctx.save();
+      ctx.rotate((t * 4) % (Math.PI * 2));
+      ctx.font = `${Math.round(r * 0.9)}px system-ui`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🔧', 0, 0);
+      ctx.restore();
+    } else {
+      // warning badge while it waits for help
+      ctx.font = `bold ${Math.round(r * 0.8)}px system-ui`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⚠️', 0, -r - 6);
+    }
   }
 }
 

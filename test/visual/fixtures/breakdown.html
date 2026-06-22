@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;background:#caa472}canvas{display:block}
+</style></head><body>
+<canvas id="c" width="520" height="320"></canvas>
+<script type="module">
+  try { performance.now = () => 1000; } catch {}   // freeze the smoke / wrench at a fixed frame
+  import { Vehicle } from '/public/components/vehicle.js';
+  const ctx = document.getElementById('c').getContext('2d');
+  ctx.fillStyle = '#caa472'; ctx.fillRect(0, 0, 520, 320);
+  const Z = 16;
+  // Left: a broken haul truck just seized up (smoke + ⚠ badge, no repair yet).
+  // Right: a shovel being repaired (green progress ring + spinning wrench).
+  const assets = [
+    { type: 'oht',       model: 'Liebherr T264', payload: 240, len: Z * 1.445, wid: Z * 0.7, broken: true, repair: 0 },
+    { type: 'excavator', model: 'Liebherr R9400', bucket: 40, len: Z * 1.2, wid: Z * 0.95, broken: true, repair: 0.6 },
+  ];
+  const scale = 4.5, cw = 520 / 2;
+  assets.forEach((a, i) => {
+    const v = new Vehicle({ label: '', gx: 0, gy: 0, ...a });
+    v.heading = 0;
+    ctx.save();
+    ctx.translate((i + 0.5) * cw, 175);
+    ctx.scale(scale, scale);
+    v.draw(ctx, false);
+    ctx.restore();
+  });
+  window.__ready = true;
+</script>
+</body></html>

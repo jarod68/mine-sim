@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   World, Vehicle, Roads, Autopilot,
-  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
+  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
 } from '../../../game/world.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -76,6 +76,18 @@ describe('Vehicle', () => {
     for (let i = 0; i < 100 && v.moving; i++) v.update(0.1, null, g, () => true, () => true); // coast, no new move
     expect(v.gx).toBe(6);
     expect(v.moving).toBe(false);
+  });
+
+  it('keeps a steady heading while blocked (no frantic sprite jitter)', () => {
+    const v = new Vehicle({ type: 'pickup', label: 'L', gx: 5, gy: 5, len: 9, wid: 5 });
+    v.place(g);
+    v.heading = 0;                                     // facing east
+    const blocked = () => false;                       // every target cell is occupied
+    // feed it alternating desired directions while it can't move
+    v.update(0.01, [0, 1], g, () => true, blocked);    // wants to turn south…
+    v.update(0.01, [0, -1], g, () => true, blocked);   // …then north
+    expect(v.moving).toBe(false);
+    expect(v.heading).toBe(0);                         // heading unchanged — it didn't spin in place
   });
 
   it('road-only trucks cannot leave the road', () => {
@@ -276,6 +288,53 @@ describe('Autopilot — grader auto-repair', () => {
     ap._updateGraders();
     expect(ap._graderState.get(gr).target).toBeNull();
     expect(ap.dirFor(gr)).not.toBeNull();             // still moving — toward the parking pad
+  });
+
+  const oneWayRoad = (dir) => {
+    const roads = new Roads(g);
+    const cells = [];
+    for (let x = 4; x <= 36; x++) cells.push({ gx: x, gy: 20, dir });
+    roads.setNetwork(cells);
+    const ap = new Autopilot(g, roads, {});
+    ap.setEnabled(true);
+    ap.isFree = () => true;
+    return { roads, ap };
+  };
+
+  it('drives a grader along the road WITH the one-way flow, staying on the network', () => {
+    const { roads, ap } = oneWayRoad({ dx: 1, dy: 0 });   // eastbound only
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(28, 20);
+    const gr = grader(8, 20);
+    ap.addGrader(gr);
+    let reached = false;
+    for (let t = 0; t < 200; t++) {
+      ap._updateGraders();
+      const d = ap.dirFor(gr);
+      if (d === null) { reached = gr.gx === 28 && gr.gy === 20; break; }
+      expect(d[0]).not.toBe(-1);                        // never against the flow
+      gr.gx += d[0]; gr.gy += d[1];
+      expect(roads.isRoad(gr.gx, gr.gy)).toBe(true);    // stays on the tarmac
+      if (gr.gx === 28 && gr.gy === 20) { reached = true; break; }
+    }
+    expect(reached).toBe(true);
+  });
+
+  it('asks a stationary truck blocking its lane to give way (grader has priority)', () => {
+    const { roads, ap } = oneWayRoad({ dx: 1, dy: 0 });
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(28, 20);
+    const gr = grader(8, 20);
+    ap.addGrader(gr);
+    const truck = new Vehicle({ type: 'oht', label: 'OHT01', gx: 9, gy: 20, len: 14, wid: 7 });
+    truck.place(g);
+    ap.state.set(truck, { phase: 'to_parking', dir: null, timer: 0, stuck: 0, want: null });
+    ap.isFree = (gx, gy, self) => !(self !== truck && gx === truck.gx && gy === truck.gy);
+    ap._updateGraders();
+    ap.dirFor(gr);                                      // grader blocked by the truck ahead
+    const st = ap.state.get(truck);
+    expect(st.giveWay).toBeTruthy();                   // truck told to pull aside
+    ap._tickGiveWay(truck, st);
+    expect(st.dir).not.toBeNull();                     // and it steps off the lane
+    expect(truck.offroad).toBe(true);
   });
 });
 
@@ -753,6 +812,31 @@ describe('World — collisions & live deltas', () => {
     expect([oht.gx, oht.gy]).toEqual([55, 64]);
   });
 
+  it('routes every vehicle AROUND a shovel straddling a road (never through it)', () => {
+    for (const tested of ['LV01', 'OHT01']) {     // a narrow scout and a wide haul truck
+      const w = new World();
+      const gy = 70;
+      const cells = [];
+      for (let x = 30; x <= 70; x++) cells.push({ gx: x, gy });
+      w.setRoads(cells);
+      const hex = w.byLabel.get('HEX01');
+      hex.gx = 50; hex.gy = gy; hex.place(w.grid);     // shovel parked across the road
+      for (const v of w.vehicles) w.autopilot.setManual(v);  // park everyone else
+      const v = w.byLabel.get(tested);
+      v.gx = 35; v.gy = gy; v.place(w.grid);
+      w.moveTo(tested, 68, gy);
+      const onShovel = new Set(hex.occupiedCells(w.grid).map((c) => `${c.gx},${c.gy}`));
+      let touched = false, done = false;
+      for (let i = 0; i < 6000 && !done; i++) {
+        w.tick(1 / 30);
+        if (onShovel.has(`${v.gx},${v.gy}`)) touched = true;
+        done = !w._moveTo.has(v);
+      }
+      expect(touched).toBe(false);                      // never drove onto the shovel
+      expect([v.gx, v.gy]).toEqual([68, gy]);           // and still reached the far side
+    }
+  });
+
   it('manual driving cancels an active move order', () => {
     const w = new World();
     const lv = w.byLabel.get('LV01');
@@ -1077,6 +1161,19 @@ describe('World — shovel relocation', () => {
     w.autopilot._updateShovels();
     expect(w.autopilot._shovelMove.has(hex)).toBe(false);
   });
+
+  it('prefers a truck-accessible ore block over an equally-near inaccessible one', () => {
+    const { w, hex, bx, by } = setupShovel();          // ore already at the EAST block (bx+1, by)
+    const south = w.mine.blocks[by + 1][bx];           // an equally-near ore block to the south…
+    south.explored = true; south.ore = 'iron'; south.oreRemaining = 5000;
+    // …but only the EAST block gets a road bay (a truck can load there)
+    w.setRoads([{ gx: (bx + 1) * 2, gy: by * 2 - 1 }, { gx: (bx + 1) * 2 + 1, gy: by * 2 - 1 }]);
+    w.autopilot._updateShovels();
+    const mv = w.autopilot._shovelMove.get(hex);
+    expect(mv).toBeTruthy();
+    expect(Math.floor(mv.gx / 2)).toBe(bx + 1);        // chose the truck-accessible block
+    expect(Math.floor(mv.gy / 2)).toBe(by);
+  });
 });
 
 // ── Parking: alignment & resize ───────────────────────────────────────────────
@@ -1215,5 +1312,58 @@ describe('rich prep veins (World)', () => {
     w.tick(1 / 30);
     // (10,10) is in the spawn keep-out; the nearest vein is well beyond 5 blocks
     expect(w._dozerPrep.has(dz)).toBe(false);
+  });
+});
+
+describe('World — breakdowns', () => {
+  it('breaks a shovel/truck on demand, freezes it, and emits an alert + fields', () => {
+    const w = new World();
+    w.liveDelta();                                   // drain the initial frame
+    const label = w.testBreakdown();
+    const v = w.byLabel.get(label);
+    expect(['oht', 'excavator']).toContain(v.type);
+    expect(v.broken).toBe(true);
+    const d = w.liveDelta();
+    expect(d.breakdowns).toEqual([{ label, type: v.type, x: v.x, y: v.y }]);
+    expect(d.vehicles.find((x) => x.id === v.id).broken).toBe(true);
+    // frozen: it does not move no matter how long we tick
+    const [x, y] = [v.x, v.y];
+    for (let i = 0; i < 60; i++) w.tick(1 / 30);
+    expect([v.x, v.y]).toEqual([x, y]);
+    expect(v.broken).toBe(true);
+  });
+
+  it('repairs only when a light vehicle is parked alongside, taking REPAIR_TIME', () => {
+    const w = new World();
+    const v = w.byLabel.get('HEX01');                 // a shovel, well clear of the parking
+    w._breakAsset(v);
+    expect(v.broken).toBe(true);
+    const lv = w.byLabel.get('LV01');
+    lv.manual = true; w.autopilot.setManual(lv);
+
+    // light vehicle parked far away → not adjacent → it stays broken, no progress
+    lv.gx = w.grid.zoneCols - 2; lv.gy = w.grid.zoneRows - 2; lv.place(w.grid);
+    expect(w._lightVehicleAdjacent(v)).toBe(false);
+    for (let i = 0; i < 30 * 2; i++) w.tick(1 / 30);
+    expect(v.broken).toBe(true);
+    expect(v.repair).toBe(0);
+
+    // park the LV right against the shovel body → repaired after ~REPAIR_TIME seconds
+    const cell = v.occupiedCells(w.grid)[0];
+    lv.gx = cell.gx; lv.gy = cell.gy - 1; lv.place(w.grid);
+    expect(w._lightVehicleAdjacent(v)).toBe(true);
+    let secs = 0;
+    for (let i = 0; i < 30 * 8 && v.broken; i++) { w.tick(1 / 30); secs += 1 / 30; }
+    expect(v.broken).toBe(false);
+    expect(secs).toBeGreaterThanOrEqual(REPAIR_TIME - 0.2);
+    expect(secs).toBeLessThan(REPAIR_TIME + 1);
+  });
+
+  it('only shovels and haul trucks break (not the scout / dozer / grader)', () => {
+    const w = new World();
+    for (let i = 0; i < 50; i++) w.testBreakdown();   // break everything breakable
+    for (const v of w.vehicles) {
+      if (v.type === 'pickup' || v.type === 'dozer' || v.type === 'grader') expect(v.broken).toBe(false);
+    }
   });
 });

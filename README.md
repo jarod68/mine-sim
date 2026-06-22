@@ -80,9 +80,10 @@ the view so you can extend far. **🧽 Eraser** removes road (parking pads stay)
 
 ### Fleet
 
-Click **🛒 Buy assets** to expand the fleet (haul trucks, shovels, a scout), up to
-150 vehicles. A new shovel never spawns within 2 blocks of another. You can also
-buy **extra crushers** (up to 5, $1,000,000 each) and click the map to place them.
+Click **🛒 Buy assets** to expand the fleet (haul trucks, shovels, a scout, a
+**dozer**, a **grader**), up to 150 vehicles. A new shovel never spawns within 2
+blocks of another. You can also buy **extra crushers** (up to 5, $1,000,000 each)
+and click the map to place them.
 
 ![Buy-assets shop](docs/screenshots/shop.png)
 
@@ -97,6 +98,15 @@ buy **extra crushers** (up to 5, $1,000,000 each) and click the map to place the
   shortest path, on roads and off-road where needed.
 - **Click the parking pad** to show resize handles; drag a side to grow/shrink it
   (roads under the new pad are trimmed automatically).
+
+### Breakdowns
+
+Shovels and haul trucks are reliable ~99% of the time, but one can **break down at
+random**: it **freezes in place, smoking**, a popup alerts you, and it's flagged
+**red** (⚠️) in the top-left details panel and the **Fleet** list. To fix it,
+**drive a light vehicle (LV) into an adjacent cell** — a green repair ring fills
+over ~5 s, then it runs again. (With `TEST_MODE` set, press <kbd>P</kbd> to force a
+test breakdown.)
 
 ---
 

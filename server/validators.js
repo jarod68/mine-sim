@@ -62,6 +62,9 @@ function validateCommand(m, bounds) {
     case 'reset':
       return { t: 'reset' };
 
+    case 'breakdown':
+      return { t: 'breakdown' };   // test-only; gated to TEST_MODE in the router
+
     case 'resizeParking':
       return m.rect && typeof m.rect === 'object'
         ? { t: 'resizeParking', rect: validateRect(m.rect) } : null;

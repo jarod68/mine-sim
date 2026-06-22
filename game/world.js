@@ -13,6 +13,7 @@ const { MinHeap } = require('./min-heap');
 const {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
   STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
+  BREAKDOWN_CHANCE, REPAIR_TIME,
   ORE_VALUE, PARKING, PARK_HEADING, PARK_BLOCKS,
   EXCAVATORS, SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
   DIRS, key, rectsOverlap,
@@ -150,6 +151,7 @@ class World {
     this._lastPos = new Map();    // id → last position signature
     this._lastCredit = null;
     this._payouts = [];        // pending crusher "+$" payout pops to broadcast
+    this._breakdowns = [];     // assets that just broke down, to alert clients
     this._debug = new Set();   // labels with debug-path visualisation enabled
     this._gridDirty = true; this._gridJson = null;   // cached mine-grid JSON (persistence)
     this._occ = null;          // collision occupancy index (built each tick)
@@ -346,15 +348,19 @@ class World {
       return !s || s.size === 0 || (s.size === 1 && s.has(self));
     };
     this.autopilot.isFree = isFree;
+    this._updateBreakdowns(dt);                      // random seize-ups + light-vehicle repairs
     this._updateDozers();                           // auto-start + tally dozer prep passes
     this.autopilot.update(dt);
     for (const v of this.vehicles) {
       let dir = null;
-      const mv = this._moveStep(v);                 // "move to point" override
-      if (mv !== undefined) dir = mv;
-      else if (v.manual && v.manualDir) dir = v.manualDir;
-      else if (this._dozerPrep.has(v)) dir = this._dozerStep(v);   // preparing a rich vein
-      else if (this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
+      if (v.broken) { dir = null; }                 // a broken-down asset is frozen in place
+      else {
+        const mv = this._moveStep(v);               // "move to point" override
+        if (mv !== undefined) dir = mv;
+        else if (v.manual && v.manualDir) dir = v.manualDir;
+        else if (this._dozerPrep.has(v)) dir = this._dozerStep(v);   // preparing a rich vein
+        else if (this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
+      }
       // Haul trucks crawl over degraded road segments (only the impacted cells).
       if (v.type === 'oht')
         v.speedMul = (this.roads.isWorn(v.gx, v.gy) || (v.moving && this.roads.isWorn(v.tgx, v.tgy))) ? WORN_SPEED_MULT : 1;
@@ -375,11 +381,57 @@ class World {
     if (flipped) this._roadDirty.add(key(v.gx, v.gy));
   }
 
+  // ── breakdowns ───────────────────────────────────────────────────────────────
+  // Shovels & haul trucks seize up at random (rare). A broken asset is frozen and
+  // smoking until a LIGHT VEHICLE is parked in a cell next to it for REPAIR_TIME s.
+  _updateBreakdowns(dt) {
+    for (const v of this.vehicles) {
+      if (v.type !== 'oht' && v.type !== 'excavator') continue;
+      if (v.broken) {
+        if (this._lightVehicleAdjacent(v)) {
+          v.repair += dt;
+          if (v.repair >= REPAIR_TIME) { v.broken = false; v.repair = 0; }
+        }
+        continue;
+      }
+      if (!v.manual && Math.random() < BREAKDOWN_CHANCE) this._breakAsset(v);
+    }
+  }
+
+  _breakAsset(v) {
+    if (!v || v.broken || (v.type !== 'oht' && v.type !== 'excavator')) return false;
+    v.broken = true; v.repair = 0;
+    v.task = null; v.digging = false; v.moving = false;
+    v.place(this.grid);                       // snap to its cell so it doesn't freeze mid-hop
+    this._breakdowns.push({ label: v.label, type: v.type, x: v.x, y: v.y });
+    return true;
+  }
+
+  // Is a light vehicle parked in a cell orthogonally touching this asset's body?
+  _lightVehicleAdjacent(v) {
+    const occ = new Set(v.occupiedCells(this.grid).map((c) => key(c.gx, c.gy)));
+    for (const lv of this.vehicles) {
+      if (lv.type !== 'pickup') continue;
+      for (const c of lv.occupiedCells(this.grid))
+        for (const [dx, dy] of DIRS) if (occ.has(key(c.gx + dx, c.gy + dy))) return true;
+    }
+    return false;
+  }
+
+  // Test hook: break a random working shovel/truck. The server gates this to TEST_MODE.
+  testBreakdown() {
+    const elig = this.vehicles.filter((v) => (v.type === 'oht' || v.type === 'excavator') && !v.broken);
+    if (!elig.length) return null;
+    const v = elig[Math.floor(Math.random() * elig.length)];
+    return this._breakAsset(v) ? v.label : null;
+  }
+
   // True when anything is (or is about to start) moving — drives the loop's
   // adaptive tick rate (idle rooms tick far less often).
   anyMoving() {
     if (this._moveTo.size > 0 || this._dozerPrep.size > 0) return true;
     for (const v of this.vehicles) if (v.moving) return true;
+    for (const v of this.vehicles) if (v.broken && v.repair > 0) return true;   // a repair in progress
     return false;
   }
 
@@ -664,7 +716,7 @@ class World {
     if (st.from && st.from.gx === cur.gx && st.from.gy === cur.gy) st.stuck++; else st.stuck = 0;
     while (st.i < st.path.length && st.path[st.i].gx === cur.gx && st.path[st.i].gy === cur.gy) st.i++;
     if (st.i >= st.path.length) { this._endMove(v); return null; }
-    if (st.stuck > 18) {                    // blocked → replan around it, or give up
+    if (st.stuck > 10) {                    // blocked → replan around it, or give up
       const path = this._planMovePath(v, st.gx, st.gy);
       if (!path || path.length <= 1) { this._endMove(v); return null; }
       st.path = path; st.i = 1; st.stuck = 0;
@@ -692,17 +744,34 @@ class World {
     const walls = this._crusherCells();
     walls.delete(key(tgx, tgy));            // allow targeting onto a crusher edge
     if (walls.has(key(tgx, tgy))) return null;
-    // Cells currently occupied by OTHER vehicles — strongly avoided so the route
-    // goes around them, but not forbidden (they move; per-step waiting/replanning
-    // handles the rest).
-    const occ = new Set();
+    // Cells held by OTHER vehicles. A stationary "worker" (shovel / dozer / grader)
+    // or a broken-down asset won't move out of the way, so it's a near-wall — every
+    // vehicle routes firmly AROUND a shovel straddling a road. A mobile vehicle is
+    // only softly avoided (it'll clear; per-step waiting/replanning handles the rest).
+    const busy = new Set();                 // mobile vehicles (soft avoid)
+    const fixed = new Set();                // stationary obstacles (route around)
     for (const o of this.vehicles) {
       if (o === v) continue;
-      for (const c of o.occupiedCells(this.grid)) occ.add(key(c.gx, c.gy));
+      const stationary = o.broken || o.type === 'excavator' || o.type === 'dozer' || o.type === 'grader';
+      const set = stationary ? fixed : busy;
+      for (const c of o.occupiedCells(this.grid)) set.add(key(c.gx, c.gy));
     }
-    occ.delete(key(tgx, tgy));
+    busy.delete(key(tgx, tgy));
+    fixed.delete(key(tgx, tgy));            // allow targeting onto/right next to one
+    // A 1-cell clearance ring around each stationary obstacle, so WIDE vehicles
+    // (whose body spans more than one cell) swing wide enough to actually pass —
+    // routing the centre two cells clear instead of clipping the shovel.
+    const near = new Set();
+    for (const fk of fixed) {
+      const [fx, fy] = fk.split(',').map(Number);
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) { const nk = key(fx + dx, fy + dy); if (!fixed.has(nk)) near.add(nk); }
+    }
+    near.delete(key(tgx, tgy));
     const OFFROAD = 4;                      // off-road step cost (roads cost 1)
-    const BUSY = 60;                        // penalty for a cell another vehicle holds
+    const BUSY = 60;                        // a mobile vehicle in the way
+    const NEAR = 80;                        // a cell hugging a stationary obstacle (keep clear)
+    const BLOCKED = 800;                    // a stationary worker / broken asset → go around
     const id = (gx, gy) => gy * zoneCols + gx;
     const g = new Map();
     const came = new Map();
@@ -721,7 +790,8 @@ class World {
         if (nx < 0 || ny < 0 || nx >= zoneCols || ny >= zoneRows) continue;
         if (walls.has(key(nx, ny))) continue;
         const k = key(nx, ny);
-        const ng = cur.g + (this.roads.isRoad(nx, ny) ? 1 : OFFROAD) + (occ.has(k) ? BUSY : 0);
+        const ng = cur.g + (this.roads.isRoad(nx, ny) ? 1 : OFFROAD)
+          + (fixed.has(k) ? BLOCKED : near.has(k) ? NEAR : busy.has(k) ? BUSY : 0);
         const nId = id(nx, ny);
         if (ng >= (g.get(nId) ?? Infinity)) continue;
         g.set(nId, ng);
@@ -893,6 +963,7 @@ class World {
       len: v.len, wid: v.wid,
       load: v.load, loadOre: v.loadOre, payload: v.payload, bucket: v.bucket,
       task: v.task, digging: v.digging, manual: v.manual,
+      broken: v.broken, repair: v.broken ? Math.round((v.repair / REPAIR_TIME) * 100) / 100 : 0,
       shovel: v.type === 'oht' ? (this.autopilot.assignedShovel(v)?.label ?? null) : null,
       prepLine: prepLineStr(v),
     };
@@ -942,6 +1013,8 @@ class World {
       task: v.task ? { kind: v.task.kind, progress: Math.round(v.task.progress * 100) / 100 } : null,
       digging: v.digging,
       manual: v.manual,
+      broken: v.broken,
+      repair: v.broken ? Math.round((v.repair / REPAIR_TIME) * 100) / 100 : 0,
       shovel: v.type === 'oht' ? (this.autopilot.assignedShovel(v)?.label ?? null) : null,
       prepLine: prepLineStr(v),
     };
@@ -1001,6 +1074,9 @@ class World {
     const payouts = this._payouts.length ? this._payouts : null;
     if (payouts) this._payouts = [];
 
+    const breakdowns = this._breakdowns.length ? this._breakdowns : null;
+    if (breakdowns) this._breakdowns = [];
+
     let roads = null;
     if (this._roadDirty.size) {
       roads = [...this._roadDirty].map((k) => {
@@ -1010,10 +1086,11 @@ class World {
       this._roadDirty.clear();
     }
 
-    if (!vehicles.length && !blocks.length && !creditChanged && !payouts && !roads) return null;
+    if (!vehicles.length && !blocks.length && !creditChanged && !payouts && !roads && !breakdowns) return null;
     const msg = { vehicles, blocks };
     if (creditChanged) msg.credit = this.credit;
     if (payouts) msg.payouts = payouts;
+    if (breakdowns) msg.breakdowns = breakdowns;
     if (roads) msg.roads = roads;
     return msg;
   }
@@ -1057,5 +1134,5 @@ function fieldEq(a, b) {
 module.exports = {
   World, Vehicle, Roads, Autopilot,
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST,
-  ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
+  ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
 };

@@ -169,4 +169,5 @@ export class Net {
   select(label, on)       { this._send({ t: 'select', label, on }); }
   resizeParking(rect)     { this._send({ t: 'resizeParking', rect }); }
   reset()                 { this._send({ t: 'reset' }); }
+  breakdown()             { this._send({ t: 'breakdown' }); }   // test-only (server-gated)
 }

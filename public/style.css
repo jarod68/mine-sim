@@ -98,6 +98,9 @@ body {
   color: #9aa0aa;
 }
 .asset .ai b { font-weight: 600; }
+/* broken-down status, flagged red in the details panel */
+.asset .ai-broken i { color: #ff9a8f; }
+.asset .ai-broken b { color: #ff6a5a; }
 .asset select {
   background: #2a2e36;
   color: #e8eaed;
@@ -308,6 +311,12 @@ main {
 }
 .al-row:hover { background: #252a33; }
 .al-row.sel { border-color: #f2b81c; background: rgba(242, 184, 28, 0.1); }
+/* broken-down assets: red-tinted row + a badge next to the name */
+.al-row.broken { background: rgba(224, 88, 74, 0.14); }
+.al-row.broken.sel { border-color: #e0584a; }
+.al-row.broken .al-name { color: #ff8a7e; }
+.al-broken { color: #ff6a5a; font-weight: 700; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.al-broken:empty { display: none; }
 .al-icon { display: flex; align-items: center; justify-content: center; }
 .al-svg { width: 32px; height: 24px; display: block; }
 .al-main { min-width: 0; }
@@ -351,6 +360,40 @@ main {
   white-space: nowrap;
 }
 .place-hint[hidden] { display: none; }
+
+/* ── Breakdown alert popup ── */
+.breakdown-alert {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(28, 16, 16, 0.96);
+  color: #ffd0d0;
+  border: 1px solid #e0584a;
+  border-radius: 8px;
+  padding: 8px 10px 8px 14px;
+  font: 600 13px system-ui;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+  max-width: 92%;
+}
+.breakdown-alert[hidden] { display: none; }
+.breakdown-alert .bd-text { white-space: normal; }
+.breakdown-alert .bd-locate {
+  flex: none;
+  background: #2563c9; color: #fff; border: none; border-radius: 6px;
+  padding: 5px 9px; font: 600 12px system-ui; cursor: pointer; white-space: nowrap;
+}
+.breakdown-alert .bd-locate:hover { background: #2f74e0; }
+.breakdown-alert .bd-close {
+  flex: none;
+  background: none; border: none; color: #d99; font-size: 18px; line-height: 1;
+  padding: 0 2px; cursor: pointer;
+}
+.breakdown-alert .bd-close:hover { color: #fff; }
 
 /* ── Parking resize overlay ── */
 .park-overlay {

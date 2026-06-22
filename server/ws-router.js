@@ -64,7 +64,7 @@ function handleMessage(ws, raw, rooms, testMode = false) {
       if (rooms.full()) return send(ws, { t: 'joinError', reason: 'server full' });
       const room = rooms.createRoom();
       rooms.addClient(ws, room);
-      return sendJoined(ws, room);
+      return sendJoined(ws, room, testMode);
     }
     const room = rooms.get(m.room);
     if (!room) {
@@ -73,7 +73,7 @@ function handleMessage(ws, raw, rooms, testMode = false) {
       return;
     }
     rooms.addClient(ws, room);
-    return sendJoined(ws, room);
+    return sendJoined(ws, room, testMode);
   }
 
   // ── Room-scoped commands ──
@@ -117,6 +117,9 @@ function handleMessage(ws, raw, rooms, testMode = false) {
       roomBroadcast(room, { t: 'state', state: world.fullState() });
       rooms.logEvent('reset', room.code);
       break;
+    case 'breakdown':
+      if (testMode) world.testBreakdown();   // force a random asset to break (test only)
+      break;
     case 'resizeParking': {
       const rect = world.resizeParking(m.rect);
       // Only the pad + road network changed — no need to resend the whole grid.
@@ -127,9 +130,11 @@ function handleMessage(ws, raw, rooms, testMode = false) {
   rooms.markDirty(room);   // any command mutated the world → persist on next save
 }
 
-function sendJoined(ws, room) {
+function sendJoined(ws, room, testMode = false) {
   send(ws, { t: 'joined', room: room.code });
-  send(ws, { t: 'state', state: room.world.fullState() });
+  const state = room.world.fullState();
+  state.testMode = testMode;          // lets the client enable the 'P' test-breakdown key
+  send(ws, { t: 'state', state });
 }
 
 module.exports = { setupWebsocket, handleMessage };

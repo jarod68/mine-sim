@@ -33,6 +33,10 @@ class Vehicle {
     this.loadOre = null;
     this.task = null;
     this.digging = false;
+    // Breakdown state: `broken` freezes the asset; `repair` accumulates seconds a
+    // light vehicle has spent fixing it (0 → REPAIR_TIME).
+    this.broken = false;
+    this.repair = 0;
     this.manual = false;
     this.manualDir = null;
     // Autopilot may steer this vehicle off the road (truck docking to a shovel).
@@ -66,14 +70,18 @@ class Vehicle {
 
     if (!this.moving && dir) {
       const [dx, dy] = dir;
-      this.heading = Math.atan2(dy, dx);
+      const heading = Math.atan2(dy, dx);           // the heading this move WOULD take
       const nx = this.gx + dx;
       const ny = this.gy + dy;
       const inBounds = nx >= 0 && nx < grid.zoneCols && ny >= 0 && ny < grid.zoneRows;
       const onRoad = !this.roadOnly || this.manual || this.offroad || (isRoad && isRoad(nx, ny));
-      const cells = this.collisionCells(nx, ny, grid, this.heading);
+      const cells = this.collisionCells(nx, ny, grid, heading);
       const free = !isFree || cells.every((c) => isFree(c.gx, c.gy, this));
       if (inBounds && onRoad && free) {
+        // Commit the heading ONLY when the move is actually taken. Setting it on a
+        // rejected move made a blocked vehicle whose desired direction flips spin its
+        // sprite back and forth (the frantic left-right/up-down jitter).
+        this.heading = heading;
         this.fromGx = this.gx; this.fromGy = this.gy;
         this.tgx = nx; this.tgy = ny;
         this.moving = true;
@@ -133,6 +141,7 @@ class Vehicle {
       type: this.type, label: this.label, gx: this.gx, gy: this.gy, heading: this.heading,
       len: this.len, wid: this.wid, model: this.model, bucket: this.bucket, payload: this.payload,
       load: this.load, loadOre: this.loadOre, manual: this.manual,
+      broken: this.broken,
     };
   }
 
@@ -145,6 +154,7 @@ class Vehicle {
     v.load = d.load || 0;
     v.loadOre = d.loadOre || null;
     v.manual = !!d.manual;
+    v.broken = !!d.broken;
     if (grid) v.place(grid);
     return v;
   }

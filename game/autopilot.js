@@ -118,6 +118,7 @@ class Autopilot {
 
   _updateShovels() {
     for (const shovel of this.shovels) {
+      if (shovel.broken) { this._shovelMove.delete(shovel); continue; }   // frozen → no relocation
       const move = this._shovelMove.get(shovel);
       if (move) {
         // Re-evaluate the in-progress relocation each tick: stop on arrival, or
@@ -242,23 +243,51 @@ class Autopilot {
       let st = this._graderState.get(g);
       if (!st) { st = { target: null }; this._graderState.set(g, st); }
       if (!(st.target && worn.has(st.target))) {     // need a fresh target
-        st.target = this._pickGraderTarget(g, worn, claimed);
+        const next = this._pickGraderTarget(g, worn, claimed);
+        if (next !== st.target) { st.skirt = null; st.stuck = 0; }   // new destination → drop any skirt
+        st.target = next;
         if (st.target) claimed.add(st.target);
       }
     }
   }
 
-  // Nearest worn cell to this grader that's at least SPREAD cells from every cell
-  // another grader has claimed — so multiple graders disperse. Falls back to the
-  // plain nearest worn cell when there are more graders than distinct clusters.
+  // Road distance from the grader to every reachable cell (forward BFS, one-way
+  // aware) — so it can pick the worn cell that's genuinely SHORTEST to drive to,
+  // not just nearest as the crow flies. Null when the grader is off the network.
+  _graderReach(grader) {
+    const a = this._logical(grader);
+    if (!this.roads.isRoad(a.gx, a.gy)) return null;
+    const dist = new Map([[key(a.gx, a.gy), 0]]);
+    const q = [a];
+    for (let h = 0; h < q.length; h++) {
+      const c = q[h];
+      const d = dist.get(key(c.gx, c.gy));
+      for (const n of this._neighbors(c)) {              // successors respect one-way flow
+        const nk = key(n.gx, n.gy);
+        if (dist.has(nk)) continue;
+        dist.set(nk, d + 1);
+        q.push(n);
+      }
+    }
+    return dist;
+  }
+
+  // The worn cell SHORTEST to reach by road (one-way aware), that another grader
+  // isn't already heading for (so several graders disperse). Off-network/unreachable
+  // cells fall back to crow-flies distance, ranked after every reachable one.
   _pickGraderTarget(grader, worn, claimed) {
     if (!worn.size) return null;
     const a = this._logical(grader);
+    const reach = this._graderReach(grader);
+    const distOf = (gx, gy) => {
+      const r = reach && reach.get(key(gx, gy));
+      return r != null ? r : 1e6 + Math.abs(a.gx - gx) + Math.abs(a.gy - gy);
+    };
     const SPREAD = 10;
     let best = null, bestD = Infinity, nearest = null, nearestD = Infinity;
     for (const wk of worn) {
       const [gx, gy] = wk.split(',').map(Number);
-      const d = Math.abs(a.gx - gx) + Math.abs(a.gy - gy);
+      const d = distOf(gx, gy);
       if (d < nearestD) { nearestD = d; nearest = wk; }
       let clear = true;
       for (const ck of claimed) {
@@ -270,16 +299,108 @@ class Autopilot {
     return best || nearest;
   }
 
-  // One step for a grader: drive (off-road as needed — graders aren't road-bound)
-  // straight toward its worn-cell target, or to a free parking cell when idle.
-  _graderStep(grader) {
+  // The goal cell-set (+ a representative point) for a grader: its worn-cell target,
+  // or the whole parking pad when there's nothing to repair.
+  _graderGoals(grader) {
     const st = this._graderState.get(grader);
     if (st && st.target) {
       const [gx, gy] = st.target.split(',').map(Number);
-      return this._offroadStep(grader, { gx, gy });
+      return { goals: new Set([st.target]), gid: `GR:${st.target}`, point: { gx, gy } };
     }
-    const slot = this._nearestFreeParkingCell(grader);
-    return slot ? this._offroadStep(grader, slot) : null;
+    const goals = new Set();
+    for (const p of this.roads.parkings || [])
+      for (let gy = p.y; gy < p.y + p.h; gy++)
+        for (let gx = p.x; gx < p.x + p.w; gx++) goals.add(key(gx, gy));
+    return { goals, gid: 'GRP', point: this._nearestFreeParkingCell(grader) };
+  }
+
+  // A grader drives ON the road network, FOLLOWING the one-way flow (via _neighbors /
+  // the reverse-BFS field), to its target. It only leaves the tarmac to get onto the
+  // network, when the target is unreachable along the flow, or — after waiting in vain
+  // for a blocking vehicle to move — to skirt it. It has right of way: a stationary
+  // truck on the cell it needs is asked to pull aside (see _requestGiveWay).
+  _graderStep(grader) {
+    const st = this._graderState.get(grader);
+    if (!st) return null;
+    const { goals, gid, point } = this._graderGoals(grader);
+    if (!goals.size || !point) return null;
+    const lc = this._logical(grader);
+    if (goals.has(key(lc.gx, lc.gy))) { st.stuck = 0; st.skirt = null; return null; }   // arrived
+
+    // Mid-skirt: drive off-road to a foothold PAST a blocker (a road cell closer to
+    // the goal), then resume road navigation from there. This is what stops the
+    // grader bouncing in place beside an obstacle.
+    if (st.skirt) {
+      const sk = st.skirt;
+      if (!(this.roads.isRoad(lc.gx, lc.gy) && lc.gx === sk.gx && lc.gy === sk.gy)) {
+        const step = this._offroadStep(grader, sk);
+        if (step) return step;
+      }
+      st.skirt = null;                                   // arrived at / lost the foothold → resume
+    }
+
+    if (this.roads.isRoad(lc.gx, lc.gy)) {
+      const field = this._distField(goals, gid);
+      const dC = field.get(key(lc.gx, lc.gy));
+      if (dC != null) {
+        let best = null, bestD = dC, blocker = null;
+        for (const n of this._neighbors(lc)) {           // successors respect one-way flow
+          const dn = field.get(key(n.gx, n.gy));
+          if (dn == null || dn >= dC) continue;
+          if (this._canOccupy(grader, n.gx, n.gy, n.gx - lc.gx, n.gy - lc.gy)) {
+            if (dn < bestD) { bestD = dn; best = n; }
+          } else if (!blocker) { blocker = n; }
+        }
+        if (best) { st.stuck = 0; return [best.gx - lc.gx, best.gy - lc.gy]; }
+        // The forward road cell is taken. Still ask a truck on it to pull aside (the
+        // grader has priority), but DON'T wait around for it: skirt past the blocker
+        // almost immediately (a couple of ticks' grace lets a vehicle merely passing
+        // through clear on its own), going around shovels and stalled traffic alike.
+        if (blocker) {
+          const t = this._stationaryTruckAt(blocker.gx, blocker.gy, grader);
+          if (t) this._requestGiveWay(t, lc);
+          if ((st.stuck = (st.stuck || 0) + 1) >= 2) {
+            st.stuck = 0;
+            const skirt = this._dodgeTarget(grader, goals, gid, lc);
+            if (skirt) { st.skirt = skirt; return this._offroadStep(grader, skirt); }
+          }
+        }
+        return null;
+      }
+      // on a road but the target can't be reached along the one-way flow → off-road
+    }
+    // Off the network (or unreachable on it): aim for the nearest road, else go straight.
+    const aim = this.roads.isRoad(lc.gx, lc.gy) ? point : (this._nearestRoadCell(grader) || point);
+    return this._offroadStep(grader, aim);
+  }
+
+  // The grader (priority) needs the cell this stationary truck sits on — flag the
+  // truck to pull aside off the lane until the grader has passed. Skipped for a truck
+  // mid load/dump/dock (committed) or already yielding to another truck.
+  _requestGiveWay(truck, from) {
+    const st = this.state.get(truck);
+    if (!st || st.yield) return;
+    if (st.phase === 'loading' || st.phase === 'dumping' || st.phase === 'docking' || st.phase === 'undocking') return;
+    st.giveWay = st.giveWay || { fromGx: from.gx, fromGy: from.gy };
+    st.giveWay.fromGx = from.gx; st.giveWay.fromGy = from.gy;
+    st.giveWay.ticks = 0;                                 // refreshed each tick the grader still waits
+  }
+
+  // Drive a truck asked to give way to a grader: pull to the side off the road to
+  // clear the lane, hold there until the grader has gone by (the request stops being
+  // refreshed for a few ticks), then resume its run.
+  _tickGiveWay(truck, st) {
+    truck.task = null;
+    st.want = null;
+    if ((st.giveWay.ticks = (st.giveWay.ticks || 0) + 1) > 10) {   // grader passed / gone
+      st.giveWay = null; truck.offroad = false; st.dir = null; st.stuck = 0; return;
+    }
+    if (truck.moving) return;                              // finish the current hop
+    const a = this._logical(truck);
+    const axis = [a.gx - st.giveWay.fromGx, a.gy - st.giveWay.fromGy];
+    const side = this._sideStepOff(truck, a, axis);
+    if (side) { truck.offroad = true; st.dir = side; return; }
+    st.dir = null;                                         // boxed in — hold; the grader skirts
   }
 
   // Closest parking-pad cell this grader can occupy — its resting spot when no road
@@ -332,8 +453,9 @@ class Autopilot {
     const st = this.state.get(truck);
     if (!st) return;
     st.want = null;   // recomputed by _advance; cleared so the resolver ignores idle trucks
-    if (this._manual.has(truck)) { st.dir = null; st.yield = null; return; }
+    if (this._manual.has(truck)) { st.dir = null; st.yield = null; st.giveWay = null; return; }
     if (st.yield) { st.dir = this._yieldStep(truck, st); return; }
+    if (st.giveWay) { this._tickGiveWay(truck, st); return; }   // pulling aside for a grader
     if (st.dodge) { this._tickDodge(truck, st); return; }   // skirting a blocking shovel
     const sb = this._shovelBlock(shovel);
 
@@ -349,7 +471,7 @@ class Autopilot {
     }
 
     switch (st.phase) {
-      case 'loading':    st.dir = null; shovel.digging = true; this._doLoad(dt, truck, shovel, sb, st); return;
+      case 'loading':    st.dir = null; if (shovel.broken) return; shovel.digging = true; this._doLoad(dt, truck, shovel, sb, st); return;
       case 'docking':    this._tickDocking(truck, shovel, sb, st); return;
       case 'undocking':  this._tickUndocking(truck, st); return;
       case 'dumping':    st.dir = null; this._doDump(dt, truck, st); return;
@@ -578,7 +700,7 @@ class Autopilot {
     // longer beat before skirting ordinary truck traffic.
     if (st.stuck < (byWorker ? STUCK_DETOUR : STUCK_DODGE)) return false;
     const blockTruck = byWorker ? null : this._stationaryTruckAt(st.want.gx, st.want.gy, truck);
-    if (blockTruck) {
+    if (blockTruck && !blockTruck.broken) {                  // a broken-down truck is always skirted
       const d = this._queueDest(truck, st);
       if (d && d === this._queueDest(blockTruck, this.state.get(blockTruck))) return false; // same queue → wait behind
     }

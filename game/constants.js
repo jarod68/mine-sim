@@ -24,6 +24,12 @@ const DOZER_PREP_RANGE = 5;
 const ROAD_WEAR_LIMIT = 75;
 const WORN_SPEED_MULT = 0.5;        // haul-truck speed factor over a degraded cell
 
+// Breakdowns: shovels & haul trucks are reliable ~99% of the time; the rest of the
+// time one can seize up at random and freeze (black smoke) until a light vehicle is
+// driven alongside it and tends it for REPAIR_TIME seconds.
+const BREAKDOWN_CHANCE = 2e-7;      // per eligible asset, per tick (very rare)
+const REPAIR_TIME = 5;              // seconds a light vehicle must spend repairing it
+
 const ORE_VALUE = {
   iron:   10000 / 240,
   copper: 16000 / 240,
@@ -111,6 +117,7 @@ const rectsOverlap = (a, b) =>
 module.exports = {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
   STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
+  BREAKDOWN_CHANCE, REPAIR_TIME,
   ORE_VALUE, PARKING, PARK_HEADING, PARK_BLOCKS,
   BASE_SPEED, TRUCK_COLLISION_SCALE, SPECS, EXCAVATORS,
   SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
