@@ -336,6 +336,30 @@ describe('Autopilot — grader auto-repair', () => {
     expect(st.dir).not.toBeNull();                     // and it steps off the lane
     expect(truck.offroad).toBe(true);
   });
+
+  it('routes a grader AROUND a shovel blocking its one-way lane, never against the flow', () => {
+    const { roads, ap } = oneWayRoad({ dx: 1, dy: 0 });    // one-way east, x=4..36 on row 20
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(30, 20);
+    const hex = new Vehicle({ type: 'excavator', label: 'HEX', gx: 18, gy: 20, len: 12, wid: 9 });
+    hex.place(g); ap.addShovel(hex);                       // parked across the lane
+    const occ = new Set(hex.occupiedCells(g).map((c) => `${c.gx},${c.gy}`));
+    ap.isFree = (gx, gy, self) => self === hex || !occ.has(`${gx},${gy}`);
+    const gr = grader(8, 20);
+    ap.addGrader(gr);
+    let reached = false, against = false;
+    for (let t = 0; t < 400; t++) {
+      ap._updateGraders();
+      const d = ap.dirFor(gr);
+      if (d) {
+        const c = roads.cells.get(`${gr.gx},${gr.gy}`);
+        if (c && c.dir && d[0] === -c.dir.dx && d[1] === -c.dir.dy) against = true;
+        if (ap._canOccupy(gr, gr.gx + d[0], gr.gy + d[1], d[0], d[1])) { gr.fromGx = gr.gx; gr.fromGy = gr.gy; gr.gx += d[0]; gr.gy += d[1]; }
+      }
+      if (gr.gx === 30 && gr.gy === 20) { reached = true; break; }
+    }
+    expect(against).toBe(false);                          // never drove the wrong way
+    expect(reached).toBe(true);                           // got past the shovel to the worn cell
+  });
 });
 
 describe('Autopilot — dozers as priority obstacles', () => {
@@ -519,6 +543,24 @@ describe('Autopilot — head-on deadlock', () => {
     // it never resolves, but the last many ticks are identical → a static jam
     const tail = trail.slice(-20);
     expect(new Set(tail).size).toBe(1);
+  });
+
+  it('a long-gridlocked truck pulls off the road to clear the lane (anti-cascade)', () => {
+    const g = grid();
+    const roads = new Roads(g);
+    roads.setNetwork([{ gx: 10, gy: 10 }, { gx: 11, gy: 10 }]);   // a tiny dead-end road
+    const ap = new Autopilot(g, roads, {});
+    ap.setEnabled(true);
+    const truck = fakeTruck(10, 10), block = fakeTruck(11, 10);
+    registerTruck(ap, truck); registerTruck(ap, block);
+    ap.state.get(truck).phase = 'to_crusher'; ap.state.get(block).phase = 'to_crusher';  // same queue
+    ap.isFree = (gx, gy, self) => self === block || !(gx === 11 && gy === 10);            // blocker cell taken
+    const st = ap.state.get(truck);
+    st.stuck = 100;                                  // jammed far longer than a normal wait
+    st.want = { gx: 11, gy: 10 };
+    ap._startDodgeIfStuck(truck, new Set(['11,10']), 'C', st);
+    expect(st.clearLane).toBeTruthy();               // it gives up its place in line and pulls aside
+    expect(st.clearLane.want).toEqual({ gx: 11, gy: 10 });
   });
 });
 
@@ -1173,6 +1215,19 @@ describe('World — shovel relocation', () => {
     expect(mv).toBeTruthy();
     expect(Math.floor(mv.gx / 2)).toBe(bx + 1);        // chose the truck-accessible block
     expect(Math.floor(mv.gy / 2)).toBe(by);
+  });
+
+  it('pulls an idle shovel OFF the road when it has nothing to dig', () => {
+    const w = new World();
+    const hex = w.byLabel.get('HEX01');
+    // strip all ore (nothing to relocate to) and lay a road under the shovel
+    for (const row of w.mine.blocks) for (const b of row) { b.explored = true; b.ore = null; b.oreRemaining = 0; }
+    w.setRoads([{ gx: hex.gx, gy: hex.gy }]);
+    expect(w.autopilot._footprintRoadCount(hex, hex.gx, hex.gy)).toBeGreaterThan(0);   // currently on the road
+    w.autopilot._updateShovels();
+    const mv = w.autopilot._shovelMove.get(hex);
+    expect(mv && mv.aside).toBe(true);                                                  // an "aside" move
+    expect(w.autopilot._footprintRoadCount(hex, mv.gx, mv.gy)).toBe(0);                 // target clears the road
   });
 });
 
