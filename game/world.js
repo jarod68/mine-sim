@@ -152,6 +152,9 @@ class World {
     this._lastCredit = null;
     this._payouts = [];        // pending crusher "+$" payout pops to broadcast
     this._breakdowns = [];     // assets that just broke down, to alert clients
+    // Ore extraction stats: tons delivered to crushers by type, totals + per game-hour.
+    this._oreStats = { elapsed: 0, totals: {}, hourly: [] };
+    this._statsDirty = false;
     this._debug = new Set();   // labels with debug-path visualisation enabled
     this._gridDirty = true; this._gridJson = null;   // cached mine-grid JSON (persistence)
     this._occ = null;          // collision occupancy index (built each tick)
@@ -173,6 +176,7 @@ class World {
       roads: this.roads.serialize(),
       blocks: this.mine.blocks,
       vehicles: this.vehicles.map((v) => v.toSnapshot()),
+      oreStats: this._oreStats,
       links: [...ap.links].map(([t, s]) => [t.label, s.label]),
       manual: [...ap._manual].map((v) => v.label),
       moveTo: [...this._moveTo].map(([v, st]) => [v.label, { gx: st.gx, gy: st.gy }]),
@@ -244,6 +248,8 @@ class World {
     this._moveTo = new Map();
     this._dozerPrep = new Map();
     this._roadDirty = new Set();
+    this._oreStats = snap.oreStats || { elapsed: 0, totals: {}, hourly: [] };
+    this._statsDirty = false;
     for (const [lbl, t] of snap.moveTo || []) this.moveTo(lbl, t.gx, t.gy);
 
     this._lastVeh = new Map();
@@ -337,6 +343,7 @@ class World {
 
   // ── simulation tick ──
   tick(dt) {
+    this._oreStats.elapsed += dt;            // game time, for per-hour extraction stats
     const isRoad = (gx, gy) => this.roads.isRoad(gx, gy);
     // Occupancy index: one Set of vehicles per cell, so collision queries are
     // O(1) instead of O(n) (the old scan made the whole tick O(n²)). Built from
@@ -604,6 +611,15 @@ class World {
     if (amount > 0) {
       const cr = this.crushers[crusherIdx] || this.crushers[0];
       if (cr) this._payouts.push({ gx: cr.x + cr.w / 2, gy: cr.y + cr.h / 2, amount });
+    }
+    // Tally the extracted tonnage by ore type — totals and per game-hour bucket.
+    if (ore && t > 0) {
+      const s = this._oreStats;
+      s.totals[ore] = (s.totals[ore] || 0) + t;
+      const h = Math.floor(s.elapsed / 3600);
+      while (s.hourly.length <= h) s.hourly.push({});
+      s.hourly[h][ore] = (s.hourly[h][ore] || 0) + t;
+      this._statsDirty = true;
     }
   }
 
@@ -986,11 +1002,17 @@ class World {
       maxExtraCrushers: MAX_EXTRA_CRUSHERS,
       roads: this.roads.serialize(),
       vehicles: this.vehicles.map((v) => this._vehicle(v)),
+      oreStats: this.oreStats(),
       // Only the "significant" blocks (explored or a rich vein) — the client
       // defaults the rest to unexplored. Cuts the initial snapshot from the whole
       // 26k-block grid to the small revealed/vein subset.
       blocks: this._significantBlocks(),
     };
+  }
+
+  // Serialisable extraction stats: tons delivered by ore type — totals + per game-hour.
+  oreStats() {
+    return { elapsed: Math.round(this._oreStats.elapsed), totals: this._oreStats.totals, hourly: this._oreStats.hourly };
   }
 
   // Flat list of blocks worth sending: explored (revealed composition) or part of
@@ -1086,12 +1108,16 @@ class World {
       this._roadDirty.clear();
     }
 
-    if (!vehicles.length && !blocks.length && !creditChanged && !payouts && !roads && !breakdowns) return null;
+    const oreStats = this._statsDirty ? this.oreStats() : null;
+    this._statsDirty = false;
+
+    if (!vehicles.length && !blocks.length && !creditChanged && !payouts && !roads && !breakdowns && !oreStats) return null;
     const msg = { vehicles, blocks };
     if (creditChanged) msg.credit = this.credit;
     if (payouts) msg.payouts = payouts;
     if (breakdowns) msg.breakdowns = breakdowns;
     if (roads) msg.roads = roads;
+    if (oreStats) msg.oreStats = oreStats;
     return msg;
   }
 

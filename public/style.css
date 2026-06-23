@@ -553,6 +553,41 @@ main {
   margin-bottom: 8px;
 }
 .shop-meta { margin-left: auto; font-size: 12px; font-weight: 500; color: #9aa0aa; }
+
+/* ── Mine statistics modal ── */
+.stats-card {
+  width: min(740px, 94vw);
+  background: #20242c;
+  border: 1px solid #353b45;
+  border-radius: 10px;
+  padding: 14px 16px;
+  color: #e8eaed;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.stats-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 12px;
+}
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #2a2f38;
+  border: 1px solid #3a4150;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+.stat-chip b { font-variant-numeric: tabular-nums; }
+.stat-grand { background: #1d3a2a; border-color: #2f8f5b; color: #9be7b8; }
+.stats-chart-wrap { background: #15171c; border: 1px solid #2a2e36; border-radius: 8px; padding: 8px; }
+.stats-svg { width: 100%; height: auto; display: block; }
+.stats-svg .grid { stroke: #2e333d; stroke-width: 1; }
+.stats-svg .ax { fill: #8b919c; font: 10px system-ui; }
+.stats-empty { color: #8b919c; text-align: center; padding: 40px 0; font-size: 13px; }
+.stats-foot { color: #8b919c; font-size: 11px; margin-top: 8px; text-align: center; }
 .shop-close {
   background: none; border: none; color: #9aa0aa;
   font-size: 20px; line-height: 1; padding: 0 4px; cursor: pointer;

@@ -26,6 +26,7 @@ let blockW = 0;
 let blockH = 0;
 let built = false;
 let testMode = false;        // server TEST_MODE → 'P' forces a test breakdown
+let oreStats = null;         // { elapsed, totals, hourly } ore extracted, for the stats graph
 let creditValue = 0;
 let catalog = [];
 let maxAssets = 150;
@@ -191,6 +192,7 @@ function flushRoadsSave() {
 function build(state) {
   built = true;
   testMode = !!state.testMode;   // enables the 'P' test-breakdown key
+  oreStats = state.oreStats || oreStats;
   paintLegend();
   drillCost = state.drillCost;
   catalog = state.catalog || [];
@@ -290,6 +292,7 @@ function refresh(state) {
   drillCost = state.drillCost;
   catalog = state.catalog || catalog;
   maxAssets = state.maxAssets || maxAssets;
+  if (state.oreStats) { oreStats = state.oreStats; if (!statsEl.hidden) renderStats(); }
   if (typeof state.extraCrushers === 'number') extraCrushers = state.extraCrushers;
   game.setMine(state);
   roads.setCrushers(state.crushers);
@@ -409,6 +412,7 @@ function onLive(data) {
   if (data.payouts) for (const p of data.payouts) fleet.addPayout(p.gx, p.gy, p.amount);
   if (data.roads && roads) roads.applyWear(data.roads);
   if (data.breakdowns) for (const b of data.breakdowns) onBreakdown(b);
+  if (data.oreStats) { oreStats = data.oreStats; if (!statsEl.hidden) renderStats(); }
   updateAssetLive();
   updateAssetListLive();
 }
@@ -902,6 +906,65 @@ document.getElementById('shop-btn').addEventListener('click', () => {
 });
 // close when clicking the backdrop (outside the card)
 shopEl.addEventListener('click', (e) => { if (e.target === shopEl) closeShop(); });
+
+// ── Mine statistics graph (ore extracted by type, per hour + totals) ──
+const statsEl = document.getElementById('stats');
+const ORE_TYPES = ['iron', 'copper', 'gold', 'carbon'];
+
+function fmtTons(n) { return `${Math.round(n).toLocaleString('en-US')} t`; }
+
+function renderStats() {
+  const s = oreStats || { elapsed: 0, totals: {}, hourly: [] };
+  const h = Math.floor(s.elapsed / 3600), m = Math.floor((s.elapsed % 3600) / 60);
+  document.getElementById('stats-elapsed').textContent = `${h}h ${m}m played`;
+
+  const grand = ORE_TYPES.reduce((a, o) => a + (s.totals[o] || 0), 0);
+  const cap = (o) => o[0].toUpperCase() + o.slice(1);
+  document.getElementById('stats-totals').innerHTML =
+    ORE_TYPES.map((o) => `<span class="stat-chip"><span class="sw" style="background:${COLORS_SOLID[o]}"></span>${cap(o)} <b>${fmtTons(s.totals[o] || 0)}</b></span>`).join('')
+    + `<span class="stat-chip stat-grand">Total <b>${fmtTons(grand)}</b></span>`;
+
+  document.getElementById('stats-chart').innerHTML = grand > 0 ? statsChartSvg(s) : '<div class="stats-empty">No ore delivered yet.</div>';
+}
+
+// A stacked bar per game-hour, segmented by ore type (its swatch colour).
+function statsChartSvg(s) {
+  const hours = Math.max(1, s.hourly.length);
+  const totals = [];
+  for (let i = 0; i < hours; i++) totals.push(ORE_TYPES.reduce((a, o) => a + ((s.hourly[i] || {})[o] || 0), 0));
+  const maxV = Math.max(1, ...totals);
+  const W = 660, H = 250, padL = 52, padB = 26, padT = 8, padR = 12;
+  const cw = (W - padL - padR) / hours;
+  const bw = Math.min(cw * 0.66, 48);
+  let grid = '';
+  for (let g = 0; g <= 4; g++) {
+    const val = (maxV * g) / 4;
+    const yy = (H - padB) - (val / maxV) * (H - padB - padT);
+    grid += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" class="grid"/>`
+      + `<text x="${padL - 7}" y="${(yy + 3).toFixed(1)}" text-anchor="end" class="ax">${Math.round(val).toLocaleString('en-US')}</text>`;
+  }
+  let bars = '';
+  for (let i = 0; i < hours; i++) {
+    const hr = s.hourly[i] || {};
+    const x = padL + i * cw + (cw - bw) / 2;
+    let y = H - padB;
+    for (const o of ORE_TYPES) {
+      const v = hr[o] || 0;
+      if (v <= 0) continue;
+      const hh = (v / maxV) * (H - padB - padT);
+      y -= hh;
+      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${COLORS_SOLID[o]}" rx="1"><title>Hour ${i} — ${o}: ${fmtTons(v)}</title></rect>`;
+    }
+    bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - padB + 15}" text-anchor="middle" class="ax">${i}h–${i + 1}h</text>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" class="stats-svg" preserveAspectRatio="xMidYMid meet">${grid}${bars}</svg>`;
+}
+
+function openStats() { statsEl.hidden = false; renderStats(); }
+function closeStats() { statsEl.hidden = true; }
+document.getElementById('stats-btn').addEventListener('click', () => (statsEl.hidden ? openStats() : closeStats()));
+document.getElementById('stats-close').addEventListener('click', closeStats);
+statsEl.addEventListener('click', (e) => { if (e.target === statsEl) closeStats(); });
 
 // ── About / How-to-play modal ──
 const aboutEl = document.getElementById('about');
