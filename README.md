@@ -99,6 +99,17 @@ and click the map to place them.
 - **Click the parking pad** to show resize handles; drag a side to grow/shrink it
   (roads under the new pad are trimmed automatically).
 
+### On a phone 📱
+
+The UI is **responsive** and fully playable by touch:
+
+- **One finger** pans the map (in Mouse mode); **pinch** to zoom.
+- **Tap** a block to open it, **tap** a vehicle for details.
+- In **Road / Eraser** mode, **drag one finger** to lay or rub out road.
+- The top bar collapses to icon-only buttons, the legend is hidden, panels and
+  modals go full-screen, and a selected asset's controls dock to the bottom of the
+  screen.
+
 ### Breakdowns
 
 Shovels and haul trucks are reliable ~99% of the time, but one can **break down at

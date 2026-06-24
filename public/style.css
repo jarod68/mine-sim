@@ -735,6 +735,10 @@ main {
    parking resize handles into finger-friendly targets. */
 .touch button, .touch .al-row, .touch .al-locate { -webkit-tap-highlight-color: transparent; }
 .touch .park-handle { width: 30px; height: 30px; margin: -15px 0 0 -15px; }
+/* No long-press text-selection / callout on the game UI; keep it on real inputs. */
+.touch { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.touch input, .touch select, .touch textarea { -webkit-user-select: auto; user-select: auto; }
+.touch button { touch-action: manipulation; }   /* no 300 ms tap delay */
 
 /* ──────────────────────────────────────────────────────────────────────────────
    Phone / narrow layout (≤ 768px). Placed last so it overrides the desktop rules.
@@ -798,4 +802,14 @@ main {
     border-radius: 0;
     border-left: none; border-right: none;
   }
+
+  /* Finger-friendly targets in lists & modals. */
+  .al-row { padding: 10px 8px; }
+  .al-locate { padding: 8px 11px; font-size: 14px; }
+  .al-close, .shop-close, .about-close { font-size: 26px; padding: 6px 10px; }
+  .shop-row { padding: 12px 0; }
+  .shop-buy { padding: 11px 14px; min-width: 100px; font-size: 14px; }
+  .asset-btn { padding: 8px 12px; font-size: 13px; }
+  .asset select { padding: 6px 8px; font-size: 14px; }
+  .stats-totals { margin-bottom: 14px; }
 }
