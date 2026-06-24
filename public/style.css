@@ -731,8 +731,10 @@ main {
 .lobby-join button:hover { background: #1f63c0; }
 .lobby-msg { color: #e0a32a; font-size: 13px; min-height: 18px; margin-top: 14px; }
 
-/* Touch devices: drop the blue tap-flash so taps feel native. */
+/* Touch devices: drop the blue tap-flash so taps feel native, and enlarge the
+   parking resize handles into finger-friendly targets. */
 .touch button, .touch .al-row, .touch .al-locate { -webkit-tap-highlight-color: transparent; }
+.touch .park-handle { width: 30px; height: 30px; margin: -15px 0 0 -15px; }
 
 /* ──────────────────────────────────────────────────────────────────────────────
    Phone / narrow layout (≤ 768px). Placed last so it overrides the desktop rules.

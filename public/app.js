@@ -541,15 +541,20 @@ function setupCamera() {
     const m = stageMid(a, b); pinchCx = m.x; pinchCy = m.y;
     touchGesture = 'pinch'; suppressTap = true; camAnim++;
   };
+  const grab = (id) => { try { stage.setPointerCapture(id); } catch { /* unsupported */ } };
   stage.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch') return;
     suppressTap = false;
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    try { stage.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
-    if (touches.size === 2) { popup.hide(); beginPinch(); }
-    else if (touches.size === 1 && roads.tool === 'none') {
+    if (touches.size === 2) {
+      popup.hide(); beginPinch();
+      for (const id of touches.keys()) grab(id);          // capture both fingers for the pinch
+    } else if (touches.size === 1 && roads.tool === 'none') {
       touchGesture = 'pan'; tpx = tStartX = e.clientX; tpy = tStartY = e.clientY; camAnim++;
+      grab(e.pointerId);
     }
+    // else: a single finger in Road/Eraser mode — DON'T capture, so the roads layer
+    // keeps receiving the move events and can draw.
   });
   stage.addEventListener('pointermove', (e) => {
     if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
