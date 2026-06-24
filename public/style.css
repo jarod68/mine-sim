@@ -10,6 +10,34 @@ body {
   align-items: center;
   gap: 12px;
   padding: 16px;
+  /* Keep the page itself from scrolling/bouncing while the game handles gestures. */
+  overscroll-behavior: none;
+}
+
+main {
+  /* The game canvas owns all touch gestures (pan/pinch); never let them scroll
+     or page-zoom the document. */
+  touch-action: none;
+}
+
+/* ── Phone / narrow layout (≤ 768px or a touch-primary device) ── */
+@media (max-width: 768px) {
+  body {
+    padding: 0;
+    gap: 0;
+    height: 100dvh;
+    /* respect the notch / home indicator */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  main {
+    flex: 1 1 auto;     /* fill whatever the chrome leaves */
+    height: auto;
+    min-height: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+  .hint { display: none; }   /* the desktop "scroll to zoom" footer is irrelevant on touch */
 }
 
 .topbar {

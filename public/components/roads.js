@@ -56,6 +56,10 @@ export class Roads {
 
   _changed() { if (this.onChange) this.onChange(); }
 
+  // Abort an in-progress drawing stroke without committing it — used when a second
+  // finger lands to start a pinch-zoom while in road/eraser mode.
+  cancelDraw() { if (this.drawing) { this.drawing = false; this._stopEdgePan(); } }
+
   // Request a redraw. The host routes this through a shared rAF so many edits or
   // pan/zoom events in one frame collapse into a single render(); without a host
   // hook we fall back to drawing immediately.

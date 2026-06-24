@@ -27,6 +27,9 @@ let blockH = 0;
 let built = false;
 let testMode = false;        // server TEST_MODE → 'P' forces a test breakdown
 let oreStats = null;         // { elapsed, totals, hourly } ore extracted, for the stats graph
+const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+if (isTouch) document.body.classList.add('touch');   // CSS hook: bigger targets, no hover-only UI
+let suppressTap = false;     // set after a touch pan/pinch so the trailing click doesn't drill/select
 let creditValue = 0;
 let catalog = [];
 let maxAssets = 150;
@@ -234,6 +237,7 @@ function build(state) {
   renderAsset(null);
 
   canvas.addEventListener('click', (e) => {
+    if (suppressTap) { suppressTap = false; return; }   // a touch pan/pinch, not a real tap
     const rect = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX, e.clientY, rect);
     // "Move to point": the next click after pressing W / the asset button picks
@@ -516,6 +520,72 @@ function setupCamera() {
   window.addEventListener('blur', () => cancelPan());
   stage.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('resize', () => { resizeAll(); fit(); });
+  window.addEventListener('orientationchange', () => setTimeout(() => { resizeAll(); fit(); }, 200));
+
+  // ── Touch gestures ──
+  // One finger pans (only in Mouse mode — in Road/Eraser mode it draws, handled by
+  // the roads layer); two fingers pinch-zoom + pan around their midpoint. A drag past
+  // a small threshold suppresses the trailing click so a pan never drills/selects.
+  const touches = new Map();             // pointerId → { x, y }
+  let touchGesture = null;               // 'pan' | 'pinch'
+  let tpx = 0, tpy = 0, tStartX = 0, tStartY = 0;   // last + first pan point
+  let pinchDist = 0, pinchCx = 0, pinchCy = 0;
+  const stageMid = (a, b) => {
+    const r = stage.getBoundingClientRect();
+    return { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+  };
+  const beginPinch = () => {
+    roads.cancelDraw();                  // a 2nd finger in road mode means zoom, not draw
+    const [a, b] = [...touches.values()];
+    pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+    const m = stageMid(a, b); pinchCx = m.x; pinchCy = m.y;
+    touchGesture = 'pinch'; suppressTap = true; camAnim++;
+  };
+  stage.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    suppressTap = false;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { stage.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
+    if (touches.size === 2) { popup.hide(); beginPinch(); }
+    else if (touches.size === 1 && roads.tool === 'none') {
+      touchGesture = 'pan'; tpx = tStartX = e.clientX; tpy = tStartY = e.clientY; camAnim++;
+    }
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touchGesture === 'pinch' && touches.size >= 2) {
+      const [a, b] = [...touches.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const m = stageMid(a, b);
+      if (pinchDist > 0) {
+        const ns = Math.max(minScale(), Math.min(6, (camera.scale * dist) / pinchDist));
+        camera.ox = m.x - ((m.x - camera.ox) * ns) / camera.scale;   // zoom about the pinch centre
+        camera.oy = m.y - ((m.y - camera.oy) * ns) / camera.scale;
+        camera.scale = ns;
+        camera.ox += m.x - pinchCx; camera.oy += m.y - pinchCy;       // and pan with the centre
+      }
+      pinchDist = dist; pinchCx = m.x; pinchCy = m.y;
+      rerender(); updateParkOverlay();
+    } else if (touchGesture === 'pan') {
+      camera.ox += e.clientX - tpx; camera.oy += e.clientY - tpy;
+      tpx = e.clientX; tpy = e.clientY;
+      if (Math.hypot(e.clientX - tStartX, e.clientY - tStartY) > 8) suppressTap = true;   // a real drag, not a tap
+      rerender(); updateParkOverlay();
+    }
+  });
+  const endTouch = (e) => {
+    if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+    touches.delete(e.pointerId);
+    try { stage.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+    if (touches.size === 0) touchGesture = null;
+    else if (touches.size === 1) {                                    // pinch → single finger left
+      touchGesture = roads.tool === 'none' ? 'pan' : null;
+      const p = [...touches.values()][0]; tpx = p.x; tpy = p.y;
+    }
+  };
+  stage.addEventListener('pointerup', endTouch);
+  stage.addEventListener('pointercancel', endTouch);
 
   resizeAll();
   fit();
