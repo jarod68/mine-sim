@@ -447,6 +447,30 @@ function setupCamera() {
     rerender();
   };
 
+  // Frame the "area of interest" at start-up — the fleet + parking + crushers, where
+  // the action is — instead of fitting the whole (mostly empty) map. Returns false if
+  // there's nothing to frame (then the caller falls back to a full-map fit).
+  const focusOnInterest = () => {
+    if (!grid) return false;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const add = (ax, ay, bx, by) => { x0 = Math.min(x0, ax); y0 = Math.min(y0, ay); x1 = Math.max(x1, bx); y1 = Math.max(y1, by); };
+    for (const v of fleet.vehicles) { const r = Math.max(v.len, v.wid); add(v.x - r, v.y - r, v.x + r, v.y + r); }
+    if (parkRect) add(parkRect.x * grid.zoneW, parkRect.y * grid.zoneH, (parkRect.x + parkRect.w) * grid.zoneW, (parkRect.y + parkRect.h) * grid.zoneH);
+    // Only the first crusher is near the start — the rest are scattered across the map.
+    const c0 = (roads.crushers || [])[0];
+    if (c0) add(c0.x * grid.zoneW, c0.y * grid.zoneH, (c0.x + c0.w) * grid.zoneW, (c0.y + c0.h) * grid.zoneH);
+    if (!Number.isFinite(x0)) return false;
+    const pad = Math.max(x1 - x0, y1 - y0) * 0.12 + 60;
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    const bw = x1 - x0, bh = y1 - y0;
+    const s = Math.max(minScale(), Math.min(4, Math.min(stage.clientWidth / bw, stage.clientHeight / bh)));
+    camera.scale = s;
+    camera.ox = (stage.clientWidth - bw * s) / 2 - x0 * s;
+    camera.oy = (stage.clientHeight - bh * s) / 2 - y0 * s;
+    rerender();
+    return true;
+  };
+
   // Smooth "fly to" tween used by the fleet panel's locate buttons. Pans (and
   // gently zooms in if far out) so the target world point ends up centred.
   let camAnim = 0;
@@ -564,7 +588,10 @@ function setupCamera() {
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
       const m = stageMid(a, b);
       if (pinchDist > 0) {
-        const ns = Math.max(minScale(), Math.min(6, (camera.scale * dist) / pinchDist));
+        // Dampen the response so the zoom isn't twitchy: apply only part of the
+        // finger-spread ratio each step.
+        const ratio = 1 + (dist / pinchDist - 1) * 0.5;
+        const ns = Math.max(minScale(), Math.min(6, camera.scale * ratio));
         camera.ox = m.x - ((m.x - camera.ox) * ns) / camera.scale;   // zoom about the pinch centre
         camera.oy = m.y - ((m.y - camera.oy) * ns) / camera.scale;
         camera.scale = ns;
@@ -593,7 +620,7 @@ function setupCamera() {
   stage.addEventListener('pointercancel', endTouch);
 
   resizeAll();
-  fit();
+  focusOnInterest() || fit();   // start framed on the fleet/parking/crushers
 }
 
 // ── Asset details panel (top-left) — compact, fields side by side ──
