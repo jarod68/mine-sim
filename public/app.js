@@ -600,6 +600,7 @@ function assetStatusText(v) {
 
 function renderAsset(v) {
   markAssetListSelection();   // keep the fleet panel's highlight in sync with the selection
+  assetEl.classList.toggle('has-asset', !!v);   // mobile: the details dock shows only when an asset is selected
   if (!v) {
     assetEl.innerHTML = '<span class="atitle">Asset</span><span class="muted">No asset selected</span>';
     return;

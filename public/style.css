@@ -20,26 +20,6 @@ main {
   touch-action: none;
 }
 
-/* ── Phone / narrow layout (≤ 768px or a touch-primary device) ── */
-@media (max-width: 768px) {
-  body {
-    padding: 0;
-    gap: 0;
-    height: 100dvh;
-    /* respect the notch / home indicator */
-    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  }
-  main {
-    flex: 1 1 auto;     /* fill whatever the chrome leaves */
-    height: auto;
-    min-height: 0;
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-  }
-  .hint { display: none; }   /* the desktop "scroll to zoom" footer is irrelevant on touch */
-}
-
 .topbar {
   width: 2048px;
   max-width: 100%;
@@ -750,3 +730,70 @@ main {
 }
 .lobby-join button:hover { background: #1f63c0; }
 .lobby-msg { color: #e0a32a; font-size: 13px; min-height: 18px; margin-top: 14px; }
+
+/* Touch devices: drop the blue tap-flash so taps feel native. */
+.touch button, .touch .al-row, .touch .al-locate { -webkit-tap-highlight-color: transparent; }
+
+/* ──────────────────────────────────────────────────────────────────────────────
+   Phone / narrow layout (≤ 768px). Placed last so it overrides the desktop rules.
+   ────────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  body {
+    gap: 0;
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  main {
+    flex: 1 1 auto;     /* fill whatever the chrome leaves */
+    height: auto;
+    min-height: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+  .hint { display: none; }   /* the desktop "scroll to zoom" footer is irrelevant on touch */
+
+  /* ── Compact top bar: icon-only buttons, no legend ── */
+  .topbar {
+    width: 100%;
+    flex: 0 0 auto;
+    column-gap: 6px;
+    row-gap: 6px;
+    padding: 6px 8px;
+  }
+  .topbar button { height: 42px; min-width: 42px; padding: 0 9px; font-size: 18px; }
+  .topbar button .lbl { display: none; }       /* show just the emoji */
+  .topbar-actions { gap: 6px; }
+  .legend { display: none; }                    /* freed up — colours are obvious in play */
+  .tools { gap: 8px; margin-left: auto; }
+  .modes { gap: 6px; }
+  .credit { font-size: 17px; margin-left: auto; margin-right: 4px; }
+  .room-badge { font-size: 11px; padding: 3px 7px; }
+
+  /* Asset details become a bottom dock, shown only when an asset is selected. */
+  .asset {
+    position: fixed;
+    left: 8px; right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto; max-width: none;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    z-index: 8;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.6);
+  }
+  .asset:not(.has-asset) { display: none; }
+
+  /* Modals & the fleet list fill the screen. */
+  .shop-card, .stats-card, .about-card {
+    width: 100%; max-width: none;
+    height: 100%; max-height: none;
+    border-radius: 0;
+    overflow-y: auto;
+  }
+  .asset-list {
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: auto;
+    border-radius: 0;
+    border-left: none; border-right: none;
+  }
+}
