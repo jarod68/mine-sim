@@ -3,6 +3,7 @@ import {
   World, Vehicle, Roads, Autopilot,
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
 } from '../../../game/world.js';
+import { sizedParkingRect } from '../../../game/world-setup.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -1256,9 +1257,9 @@ describe('World — parking alignment & resize', () => {
 
   it('sizes the pad for the fleet with ≥50% spare, growing when needed', () => {
     const w = new World();
-    const small = w._sizedParkingRect(4);           // default fleet fits the base pad
+    const small = sizedParkingRect(w.grid, 4);      // default fleet fits the base pad
     expect(small.w * Math.ceil(small.h / 2)).toBeGreaterThanOrEqual(6);
-    const big = w._sizedParkingRect(40);            // needs 60 slots → must grow
+    const big = sizedParkingRect(w.grid, 40);       // needs 60 slots → must grow
     expect(big.w * Math.ceil(big.h / 2)).toBeGreaterThanOrEqual(60);
   });
 

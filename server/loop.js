@@ -11,11 +11,13 @@ function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000
   let tickN = 0;
 
   const tick = setInterval(() => {
-    try {
-      const doNet = (++tickN % netEvery === 0);
-      const now = Date.now();
-      for (const room of rooms.rooms.values()) {
-        if (room.clients.size === 0) continue;     // frozen while nobody is connected
+    const doNet = (++tickN % netEvery === 0);
+    const now = Date.now();
+    for (const room of rooms.rooms.values()) {
+      if (room.clients.size === 0) continue;     // frozen while nobody is connected
+      // Isolate each room: a throw in one room's sim/broadcast is logged and
+      // skipped for this frame only — the other rooms still tick normally.
+      try {
 
         // Adaptive tick: a room where nothing is moving and no command arrived
         // recently is "idle" — tick it only every `idleEvery`-th frame (with the
@@ -42,9 +44,9 @@ function startLoops({ rooms, wss, tickHz = 30, netEvery = 2, heartbeatMs = 30000
           roomBroadcast(room, msg);
         }
         if (posBuf) for (const ws of room.clients) if (ws.readyState === ws.OPEN) ws.send(posBuf);
+      } catch (err) {
+        log.error(`[tick] room=${room.code} error (skipped this frame):`, err);
       }
-    } catch (err) {
-      log.error('[tick] error (continuing):', err);
     }
   }, 1000 / tickHz);
 

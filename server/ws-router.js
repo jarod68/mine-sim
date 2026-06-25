@@ -11,6 +11,27 @@ const MAX_CONN_PER_IP = 24;     // cap simultaneous sockets from one address
 const MAX_DROPPED = 400;        // terminate a socket that keeps flooding
 const MAX_JOIN_FAILS = 20;      // terminate a socket brute-forcing room codes
 
+// Per-action minimum interval (ms) on top of the global rate limiter, for
+// commands that are expensive and/or broadcast to the whole room — so one
+// client can't rebuild + rebroadcast a world 30×/s. 0 / absent = no extra gate.
+const ACTION_COOLDOWN = {
+  reset: 3000,           // rebuilds the world and broadcasts full state
+  buyCrusher: 250,       // room-wide broadcast (also credit-gated)
+  resizeParking: 120,    // reserializes + broadcasts the whole road network
+};
+
+// True (and stamps the clock) when `action` is allowed now; false while it is
+// still cooling down. State lives on the socket so it's reclaimed on close.
+function actionCooled(ws, action, now = Date.now()) {
+  const gap = ACTION_COOLDOWN[action];
+  if (!gap) return true;
+  const cd = ws._cd || (ws._cd = {});
+  const last = cd[action];
+  if (last !== undefined && now - last < gap) return false;   // first call always passes
+  cd[action] = now;
+  return true;
+}
+
 // `testMode` lifts every per-IP / per-connection anti-abuse limit (connection
 // cap, rate limiter, join-fail terminate) so a load test can hammer the server
 // from a single IP. Off by default; enable only for benchmarking.
@@ -82,6 +103,7 @@ function handleMessage(ws, raw, rooms, testMode = false) {
   const world = room.world;
   const m = validateCommand(parsed, worldBounds(world));
   if (!m) return;
+  if (!testMode && !actionCooled(ws, m.t)) return;   // per-action anti-spam
   switch (m.t) {
     case 'drill': {
       const r = world.drill(m.x, m.y);
@@ -137,4 +159,4 @@ function sendJoined(ws, room, testMode = false) {
   send(ws, { t: 'state', state });
 }
 
-module.exports = { setupWebsocket, handleMessage };
+module.exports = { setupWebsocket, handleMessage, actionCooled, ACTION_COOLDOWN };
