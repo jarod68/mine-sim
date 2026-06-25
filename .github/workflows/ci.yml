@@ -25,21 +25,18 @@ jobs:
       - run: npm run lint
       - run: npm run coverage   # vitest run --coverage, fails if thresholds drop
 
-  # Informational only: the committed screenshot baselines are rendered on macOS,
-  # so Chromium on a Linux runner produces sub-pixel font/AA diffs. We still run
-  # the suite to catch crashes/timeouts, but don't fail the build on pixel diffs.
-  # Regenerate baselines per-platform with `npm run test:visual:update`.
+  # Real gate. Runs inside the official Playwright image (browsers preinstalled)
+  # so Chromium font/AA rendering is deterministic and matches the committed
+  # *-linux.png baselines. Regenerate those in the SAME image after a UI change:
+  #   docker run --rm -v "$PWD":/work -v /work/node_modules -w /work \
+  #     mcr.microsoft.com/playwright:v1.61.0-noble \
+  #     bash -c "npm ci && npx playwright test --update-snapshots"
   visual:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    container: mcr.microsoft.com/playwright:v1.61.0-noble
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
       - run: npm run test:visual
 
   # Build + push the multi-arch image to Docker Hub (the CI equivalent of
