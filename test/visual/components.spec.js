@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 // time frozen where needed) and we screenshot-compare its canvas to a committed
 // baseline. Regenerate baselines after an intended visual change with
 // `npm run test:visual:update`.
-const fixtures = ['assets', 'blocks', 'vein-mesh', 'roads', 'parking-crusher', 'breakdown'];
+const fixtures = ['assets', 'asset-states', 'blocks', 'vein-mesh', 'roads', 'parking-crusher', 'breakdown'];
 
 for (const name of fixtures) {
   test(`renders ${name}`, async ({ page }) => {

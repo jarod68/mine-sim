@@ -111,10 +111,14 @@ function handleMessage(ws, raw, rooms, testMode = false) {
       break;
     }
     case 'roads': {
-      world.setRoads(m.cells);
+      const r = world.setRoads(m.cells);
       const out = { t: 'roads', cells: world.roads.serialize() };
       const msg = JSON.stringify(out);
       for (const c of room.clients) if (c !== ws && c.readyState === c.OPEN) c.send(msg);
+      // Budget hit → some cells were dropped; echo the canonical network back to
+      // the drawer so its optimistic stroke is corrected. (Credit propagates via
+      // the next live broadcast.)
+      if (r.dropped) send(ws, out);
       break;
     }
     case 'control': world.control(m.label, { dir: m.dir, release: m.release }); break;

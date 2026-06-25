@@ -15,7 +15,7 @@ const {
 } = require('./world-setup');
 const {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
-  STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
+  STARTING_CREDIT, DRILL_COST, ROAD_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
   BREAKDOWN_CHANCE, REPAIR_TIME,
   ORE_VALUE, PARKING, PARK_HEADING,
   EXCAVATORS, SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
@@ -529,9 +529,30 @@ class World {
   setRoads(cells) {
     // Drop any cell on an un-prepared rich vein — roads can't cross it until the
     // dozer has revealed the ground. The serialized result echoes the drop back.
-    const filtered = Array.isArray(cells) ? cells.filter((c) => !this._onUnpreparedVein(c.gx, c.gy)) : cells;
-    this.roads.setNetwork(filtered);
+    const filtered = Array.isArray(cells) ? cells.filter((c) => !this._onUnpreparedVein(c.gx, c.gy)) : [];
+
+    // Roads are paid infrastructure: every NEWLY built non-parking cell costs
+    // ROAD_COST. Cells that already exist stay free (re-sending the network, or
+    // just re-arrowing it, costs nothing) and erasing refunds nothing. When the
+    // player can't afford all the new cells, build as many as the budget allows
+    // (in payload order) and drop the rest — the router echoes the canonical
+    // network back so the optimistic client draw is corrected.
+    const paid = new Set();
+    for (const [k, c] of this.roads.cells) if (!c.parking) paid.add(k);
+    let budget = Math.max(0, Math.floor(this.credit / ROAD_COST));
+    let added = 0, dropped = 0;
+    const accepted = [];
+    for (const c of filtered) {
+      const k = key(c.gx, c.gy);
+      if (paid.has(k)) { accepted.push(c); continue; }   // already built — free
+      if (budget > 0) { accepted.push(c); paid.add(k); budget -= 1; added += 1; }
+      else dropped += 1;
+    }
+    const cost = added * ROAD_COST;
+    this.credit -= cost;
+    this.roads.setNetwork(accepted);
     this.autopilot.invalidateRoadCaches();   // road change → re-plan crusher bays + routes
+    return { added, dropped, cost, credit: this.credit };
   }
 
   // Resize the (single) parking pad to a new sub-zone rectangle. Drawn road cells
@@ -867,6 +888,7 @@ class World {
       blockTonnage: BLOCK_TONNAGE,
       credit: this.credit,
       drillCost: DRILL_COST,
+      roadCost: ROAD_COST,
       parking: this.roads.parkings[0] || PARKING,
       crushers: this.crushers,
       catalog: CATALOG,
@@ -1033,6 +1055,6 @@ function fieldEq(a, b) {
 
 module.exports = {
   World, Vehicle, Roads, Autopilot,
-  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST,
+  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_COST,
   ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
 };

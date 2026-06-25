@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;background:#caa472}canvas{display:block}
+</style></head><body>
+<canvas id="c" width="760" height="660"></canvas>
+<script type="module">
+  try { performance.now = () => 0; } catch {}   // freeze the flashing beacon
+  import { Vehicle } from '/public/components/vehicle.js';
+  const ctx = document.getElementById('c').getContext('2d');
+  ctx.fillStyle = '#caa472'; ctx.fillRect(0, 0, 760, 660);
+  const Z = 16;
+  const exca = (model, m, extra) => ({ type: 'excavator', model, bucket: 50, len: Z * 1.2 * m, wid: Z * 0.95 * m, ...extra });
+  const oht  = (extra) => ({ type: 'oht', model: 'Liebherr T264', payload: 240, len: Z * 1.445, wid: Z * 0.7, ...extra });
+
+  // The same assets in their different in-play states: digging, loaded (with the
+  // ore colour + payload %), load/dump task bars, and the selection highlight.
+  const cells = [
+    { label: 'excavator digging',   a: exca('Liebherr R9400', 1, { digging: true }) },
+    { label: 'excavator big digging',a: exca('Liebherr R9800', 1.9125, { digging: true }) },
+    { label: 'haul 50% iron',       a: oht({ load: 120, loadOre: 'iron' }) },
+    { label: 'haul 100% gold',      a: oht({ load: 240, loadOre: 'gold' }) },
+    { label: 'haul loading',        a: oht({ task: { kind: 'load', progress: 0.6 } }), sel: true },
+    { label: 'haul dumping',        a: oht({ load: 80, loadOre: 'copper', task: { kind: 'dump', progress: 0.35 } }) },
+    { label: 'pickup selected',     a: { type: 'pickup', model: 'Light Utility Vehicle', len: Z * 0.95, wid: Z * 0.57 }, sel: true },
+    { label: 'excavator selected',  a: exca('Liebherr R9600', 1.275, { digging: true }), sel: true },
+    { label: 'grader selected',     a: { type: 'grader', model: 'Caterpillar 24', len: Z * 1.445, wid: Z * 0.35 }, sel: true },
+  ];
+  const cols = 3, scale = 4.5, cw = 760 / cols, ch = 660 / 3;
+  cells.forEach((cell, i) => {
+    const v = new Vehicle({ label: '', gx: 0, gy: 0, ...cell.a });
+    v.heading = 0;
+    const cx = (i % cols + 0.5) * cw, cy = (Math.floor(i / cols) + 0.5) * ch;
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(scale, scale); v.draw(ctx, !!cell.sel); ctx.restore();
+  });
+  window.__ready = true;
+</script>
+</body></html>

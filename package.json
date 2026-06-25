@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
+    "test:robot": "robot --outputdir test/robot/results test/robot",
     "test:load": "node test/load/loadtest.js",
     "coverage": "vitest run --coverage",
     "prebuild": "npm run coverage",

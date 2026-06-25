@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   World, Vehicle, Roads, Autopilot,
-  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
+  VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
 } from '../../../game/world.js';
 import { sizedParkingRect } from '../../../game/world-setup.js';
 
@@ -739,6 +739,43 @@ describe('World — shop, assignment, manual control', () => {
     w2.credit = 1e9;
     expect(w2.buyCrusher(100, 90).ok).toBe(true);
     expect(w2.buyCrusher(101, 91).error).toBe('blocked');     // overlaps the previous one
+  });
+
+  // Cells well clear of the starter circuit (max gx 25 / gy 18) and inside the
+  // vein keep-out (blocks ≤46×≤26), so they're deterministically new + buildable.
+  const FREE = [{ gx: 30, gy: 40 }, { gx: 31, gy: 40 }, { gx: 32, gy: 40 }, { gx: 33, gy: 40 }];
+
+  it('charges ROAD_COST for each newly built road cell, free for existing ones', () => {
+    w.setRoads([]);                              // clear the free starter network
+    const before = w.credit;
+    const r1 = w.setRoads(FREE.slice(0, 3));
+    expect(r1.added).toBe(3);
+    expect(r1.cost).toBe(3 * ROAD_COST);
+    expect(w.credit).toBe(before - 3 * ROAD_COST);
+    // Re-sending the same network plus one extra only charges the new cell.
+    const r2 = w.setRoads(FREE);
+    expect(r2.added).toBe(1);
+    expect(w.credit).toBe(before - 4 * ROAD_COST);
+  });
+
+  it('does not refund erased road cells', () => {
+    w.setRoads([]);
+    w.setRoads(FREE.slice(0, 2));
+    const mid = w.credit;
+    const r = w.setRoads(FREE.slice(0, 1));      // erase one
+    expect(r.added).toBe(0);
+    expect(r.cost).toBe(0);
+    expect(w.credit).toBe(mid);                  // no refund
+  });
+
+  it('builds only what the budget allows and reports the dropped cells', () => {
+    w.setRoads([]);                              // empty baseline
+    w.credit = ROAD_COST * 2 + 50;               // affords 2 new cells
+    const r = w.setRoads(FREE);
+    expect(r.added).toBe(2);
+    expect(r.dropped).toBe(2);
+    expect(w.credit).toBe(50);
+    expect(w.roads.serialize().length).toBe(2);
   });
 
   it('assigns a truck to a shovel and clears the link with null', () => {

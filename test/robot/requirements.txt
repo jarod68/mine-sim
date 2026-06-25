@@ -1,0 +1,4 @@
+# Robot Framework end-to-end tests (browser-driven against the real server).
+# Install with:  pip install -r test/robot/requirements.txt  &&  rfbrowser init
+robotframework>=7.0
+robotframework-browser>=19.0

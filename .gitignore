@@ -7,6 +7,9 @@ playwright-report/
 test/visual/**/*-actual.png
 test/visual/**/*-diff.png
 
+# Robot Framework run artifacts (the .robot suites ARE committed)
+test/robot/results/
+
 # Dependencies (recommended — see note below)
 node_modules/
 

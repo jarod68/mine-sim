@@ -15,6 +15,7 @@ const BLOCKS_PER_CRUSHER = 5000;
 
 const STARTING_CREDIT = 100000;
 const DRILL_COST = 5000;
+const ROAD_COST = 200;          // charged per newly-built (non-parking) road cell
 
 // A dozer auto-starts preparing a rich vein when idle within this many blocks of it.
 const DOZER_PREP_RANGE = 5;
@@ -116,7 +117,7 @@ const rectsOverlap = (a, b) =>
 
 module.exports = {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
-  STARTING_CREDIT, DRILL_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
+  STARTING_CREDIT, DRILL_COST, ROAD_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
   BREAKDOWN_CHANCE, REPAIR_TIME,
   ORE_VALUE, PARKING, PARK_HEADING, PARK_BLOCKS,
   BASE_SPEED, TRUCK_COLLISION_SCALE, SPECS, EXCAVATORS,

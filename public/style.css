@@ -141,30 +141,34 @@ h1 {
 .tools {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
 }
 
+/* Compact ore key: tight swatch+label chips that wrap rather than ever clip. */
 .legend {
   display: flex;
+  flex-wrap: wrap;
   list-style: none;
   margin: 0;
   padding: 0;
-  gap: 14px;
-  font-size: 13px;
+  gap: 4px 9px;
+  font-size: 11px;
+  color: #c7ccd4;
 }
 
 .legend li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .sw {
-  width: 13px;
-  height: 13px;
+  width: 11px;
+  height: 11px;
   border-radius: 3px;
   display: inline-block;
   border: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
 }
 
 button {
@@ -759,7 +763,7 @@ main {
   }
   .hint { display: none; }   /* the desktop "scroll to zoom" footer is irrelevant on touch */
 
-  /* ── Compact top bar: icon-only buttons, no legend ── */
+  /* ── Compact top bar: icon-only buttons; legend stays visible but tiny ── */
   .topbar {
     width: 100%;
     flex: 0 0 auto;
@@ -768,10 +772,12 @@ main {
     padding: 6px 8px;
   }
   .topbar button { height: 42px; min-width: 42px; padding: 0 9px; font-size: 18px; }
-  .topbar button .lbl { display: none; }       /* show just the emoji */
+  .topbar button .lbl { display: none; }       /* show just the emoji (each button has a title) */
   .topbar-actions { gap: 6px; }
-  .legend { display: none; }                    /* freed up — colours are obvious in play */
-  .tools { gap: 8px; margin-left: auto; }
+  /* Keep the ore key visible (never hidden) — just shrink it to a swatch strip
+     that wraps onto its own row below the toggles. */
+  .tools { gap: 8px 10px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+  .legend { gap: 4px 8px; font-size: 10px; flex-basis: 100%; justify-content: flex-end; order: 2; }
   .modes { gap: 6px; }
   .credit { font-size: 17px; margin-left: auto; margin-right: 4px; }
   .room-badge { font-size: 11px; padding: 3px 7px; }

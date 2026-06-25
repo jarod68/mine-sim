@@ -39,6 +39,31 @@ jobs:
       - run: npm ci
       - run: npm run test:visual
 
+  # End-to-end smoke tests: real server + real Chromium driven by Robot Framework
+  # (Browser library). Deterministic; a real gate.
+  robot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r test/robot/requirements.txt
+      # System libs for Chromium, then the Browser library's own browser binary.
+      - run: npx playwright install --with-deps chromium
+      - run: rfbrowser init chromium
+      - run: npm run test:robot
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robot-results
+          path: test/robot/results/
+
   # Build + push the multi-arch image to Docker Hub (the CI equivalent of
   # `npm run build`). Only on a push to main, and only once the blocking `test`
   # gate is green. Requires repo secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN
