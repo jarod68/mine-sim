@@ -752,6 +752,9 @@ describe('World — shop, assignment, manual control', () => {
     expect(r1.added).toBe(3);
     expect(r1.cost).toBe(3 * ROAD_COST);
     expect(w.credit).toBe(before - 3 * ROAD_COST);
+    // The spend-pop anchor is the centroid of the newly built cells.
+    expect(r1.gx).toBe(31);   // (30+31+32)/3
+    expect(r1.gy).toBe(40);
     // Re-sending the same network plus one extra only charges the new cell.
     const r2 = w.setRoads(FREE);
     expect(r2.added).toBe(1);

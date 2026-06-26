@@ -119,6 +119,9 @@ function handleMessage(ws, raw, rooms, testMode = false) {
       // the drawer so its optimistic stroke is corrected. (Credit propagates via
       // the next live broadcast.)
       if (r.dropped) send(ws, out);
+      // Tell the drawer what it just spent so it can pop a "−$cost" over the
+      // newly-built road (mirrors the crusher payout animation).
+      if (r.cost > 0) send(ws, { t: 'roadSpend', cost: r.cost, gx: r.gx, gy: r.gy });
       break;
     }
     case 'control': world.control(m.label, { dir: m.dir, release: m.release }); break;

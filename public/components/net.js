@@ -14,6 +14,7 @@ export class Net {
     this.onState = null;     // (state) => void
     this.onLive = null;      // ({ credit, vehicles, blocks }) => void
     this.onRoads = null;     // (cells) => void  — another client edited the roads
+    this.onRoadSpend = null; // (cost, gx, gy) => void  — we just paid to build road
     this.onParking = null;   // (rect, cells) => void  — the parking pad was resized
     this.onPositions = null; // (records) => void  — binary vehicle position frame
     this.onJoined = null;    // (code) => void
@@ -61,6 +62,7 @@ export class Net {
     else if (m.t === 'state') this.onState?.(m.state);
     else if (m.t === 'live') this.onLive?.(m);
     else if (m.t === 'roads') this.onRoads?.(m.cells);
+    else if (m.t === 'roadSpend') this.onRoadSpend?.(m.cost, m.gx, m.gy);
     else if (m.t === 'parking') this.onParking?.(m.rect, m.cells);
     else if (m.t === 'vehicle') this.onVehicle?.(m.vehicle);
     else if (m.t === 'drilled') {

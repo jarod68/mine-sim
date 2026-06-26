@@ -206,6 +206,7 @@ export class Fleet {
     this._manualLabel = null;     // label we're currently driving manually
     this._lastKey = null;
     this._payouts = [];           // floating "+$" pops over crushers { x, y, amount, t }
+    this._spends = [];            // floating "−$" pops where road was just built { x, y, amount, t }
 
     window.addEventListener('keydown', (e) => {
       if (!KEY_DIRS[e.key]) return;
@@ -232,6 +233,15 @@ export class Fleet {
     if (!zW) return;
     this._payouts.push({ x: gx * zW, y: gy * zH, amount, t: 0 });
     if (this._payouts.length > 24) this._payouts.shift();   // cap, just in case
+  }
+
+  // Spawn a floating "−$XXX" pop where the player just paid to build road (sub-zone
+  // centre gx,gy). Rises and fades like the crusher payout, but in spend amber.
+  addSpend(gx, gy, amount) {
+    const zW = this.grid?.zoneW, zH = this.grid?.zoneH;
+    if (!zW || !(amount > 0)) return;
+    this._spends.push({ x: gx * zW, y: gy * zH, amount, t: 0 });
+    if (this._spends.length > 24) this._spends.shift();
   }
 
   resize(cssW, cssH) {
@@ -362,6 +372,7 @@ export class Fleet {
     }
 
     this._drawPayouts(ctx, dt);
+    this._drawSpends(ctx, dt);
 
     requestAnimationFrame(this._loop);
   }
@@ -391,6 +402,34 @@ export class Fleet {
     ctx.globalAlpha = 1;
     ctx.restore();
     this._payouts = this._payouts.filter((p) => p.t < LIFE);
+  }
+
+  // Floating "−$XXX" spend pops where road was just built: rise and fade like the
+  // payout pops, but in spend amber so debits read distinctly from credits.
+  _drawSpends(ctx, dt) {
+    if (!this._spends.length) return;
+    const LIFE = 1.6;
+    const s = Math.min(this.grid.zoneW, this.grid.zoneH);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round(s * 0.7)}px system-ui`;
+    ctx.lineWidth = Math.max(1, s * 0.12);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    for (const p of this._spends) {
+      p.t += dt;
+      const k = Math.min(1, p.t / LIFE);
+      const alpha = 1 - k * k;                 // hold bright, fade late
+      const y = p.y - s * (0.8 + 3.4 * k);     // drift upward
+      const txt = `−$${p.amount.toLocaleString('en-US')}`;
+      ctx.globalAlpha = alpha;
+      ctx.strokeText(txt, p.x, y);
+      ctx.fillStyle = '#ffb454';               // spend amber
+      ctx.fillText(txt, p.x, y);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    this._spends = this._spends.filter((p) => p.t < LIFE);
   }
 
   // Fluo-violet path line over the block-row a dozer is currently working, with a

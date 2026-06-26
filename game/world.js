@@ -540,19 +540,22 @@ class World {
     const paid = new Set();
     for (const [k, c] of this.roads.cells) if (!c.parking) paid.add(k);
     let budget = Math.max(0, Math.floor(this.credit / ROAD_COST));
-    let added = 0, dropped = 0;
+    let added = 0, dropped = 0, sx = 0, sy = 0;
     const accepted = [];
     for (const c of filtered) {
       const k = key(c.gx, c.gy);
       if (paid.has(k)) { accepted.push(c); continue; }   // already built — free
-      if (budget > 0) { accepted.push(c); paid.add(k); budget -= 1; added += 1; }
+      if (budget > 0) { accepted.push(c); paid.add(k); budget -= 1; added += 1; sx += c.gx; sy += c.gy; }
       else dropped += 1;
     }
     const cost = added * ROAD_COST;
     this.credit -= cost;
     this.roads.setNetwork(accepted);
     this.autopilot.invalidateRoadCaches();   // road change → re-plan crusher bays + routes
-    return { added, dropped, cost, credit: this.credit };
+    // Anchor for the client's "−$cost" spend pop: the centroid of the new cells.
+    const gx = added ? sx / added : null;
+    const gy = added ? sy / added : null;
+    return { added, dropped, cost, credit: this.credit, gx, gy };
   }
 
   // Resize the (single) parking pad to a new sub-zone rectangle. Drawn road cells

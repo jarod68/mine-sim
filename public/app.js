@@ -71,6 +71,7 @@ net.onState = (state) => { hydrateBlocks(state); built ? refresh(state) : build(
 net.onLive = (data) => onLive(data);
 net.onPositions = (recs) => { if (fleet) fleet.applyPositions(recs); };
 net.onRoads = (cells) => { if (roads) roads.setNetwork(cells); };
+net.onRoadSpend = (cost, gx, gy) => { if (fleet) fleet.addSpend(gx, gy, cost); };   // "−$" pop over new road
 net.onParking = (rect, cells) => {     // another client resized the parking pad
   if (!roads) return;
   parkRect = { ...rect };
