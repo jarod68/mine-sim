@@ -111,6 +111,20 @@ const DIST_CACHE_MAX = 64;        // cap distinct cached distance fields
 // "gx,gy" key for the sub-zone grid (used for road cells, occupancy, distance fields).
 const key = (gx, gy) => `${gx},${gy}`;
 
+// Nose-up "en bataille" slot grid for a parking pad rect: one column apart,
+// ranks two rows apart, anchored to the BOTTOM of the pad so a parked truck's
+// body + rear collision cell both stay inside it — a parked truck can never
+// spill onto (and block) a road running along the pad's lower edge.
+const padSlots = (p) => {
+  const rows = [];
+  for (let gy = p.y + p.h - 2; gy >= p.y; gy -= 2) rows.push(gy);
+  rows.reverse();
+  const out = [];
+  for (const gy of rows)
+    for (let gx = p.x; gx < p.x + p.w; gx++) out.push({ gx, gy });
+  return out;
+};
+
 // Do two sub-zone rectangles { x, y, w, h } overlap?
 const rectsOverlap = (a, b) =>
   a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -124,5 +138,5 @@ module.exports = {
   SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
   DIRS, BUCKET_TIME, TRUCK_CAP, DUMP_TIME, PARK_RECHECK,
   STUCK_DETOUR, STUCK_DODGE, DIST_CACHE_MAX,
-  key, rectsOverlap,
+  key, padSlots, rectsOverlap,
 };

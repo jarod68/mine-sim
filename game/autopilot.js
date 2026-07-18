@@ -2,7 +2,7 @@
 // / dump / park), shortest-path distance fields, anti-jam (detour / off-road dodge /
 // head-on yield). Drives instances handed in via the constructor + hooks.
 
-const { DIRS, BUCKET_TIME, TRUCK_CAP, DUMP_TIME, PARK_RECHECK, STUCK_DETOUR, STUCK_DODGE, DIST_CACHE_MAX, PARK_HEADING, key } = require('./constants');
+const { DIRS, BUCKET_TIME, TRUCK_CAP, DUMP_TIME, PARK_RECHECK, STUCK_DETOUR, STUCK_DODGE, DIST_CACHE_MAX, PARK_HEADING, key, padSlots } = require('./constants');
 
 class Autopilot {
   constructor(grid, roads, hooks) {
@@ -142,12 +142,13 @@ class Autopilot {
       const here = this.hooks.getBlock(bx, by);
       // Productive only on an explored block that still has ore → keep mining.
       if (here && here.explored && here.ore && here.oreRemaining > 0) continue;
-      // Otherwise relocate to the best EXPLORED ore block within 3 blocks, onto a
-      // sub-zone where the shovel's body clears every surrounding road. If no fully
-      // road-clear spot exists nearby (shovel hemmed in by roads), relax the
-      // constraint so it still moves to ore and keeps working instead of stalling.
-      const next = this._bestOreInRadius(shovel, bx, by, 3, false)
-                || this._bestOreInRadius(shovel, bx, by, 3, true);
+      // Otherwise relocate to the best EXPLORED ore block, onto a sub-zone where
+      // the shovel's body clears every surrounding road AND trucks can still come
+      // alongside. A shovel NEVER settles on a road: rather than relaxing that
+      // constraint we widen the search, and if no clean spot exists it stays put
+      // (pulling aside below if it idles on tarmac).
+      const next = this._bestOreInRadius(shovel, bx, by, 3)
+                || this._bestOreInRadius(shovel, bx, by, 6);
       if (next) { this._shovelMove.set(shovel, next.place); continue; }
       // Nothing to dig. If it's idle ON a road, pull it off to the side so it stops
       // blocking traffic; otherwise just sit where it is.
@@ -187,53 +188,87 @@ class Autopilot {
   }
 
   // How many cells of the shovel's graphic footprint, centred on (gx,gy), sit on a
-  // road. Infinity if the footprint would leave the map. 0 means it clears every
-  // road — so we never *prefer* parking straddling a road, but can fall back to it.
+  // road — taken as the WORST of the two axis-aligned headings, since the shovel
+  // may settle facing either way (its drive steps are axis-aligned, see
+  // _shovelStep). Infinity if the footprint would leave the map. 0 means the body
+  // clears every road whichever way it ends up facing.
   _footprintRoadCount(shovel, gx, gy) {
     let n = 0;
-    for (const c of shovel.footprintAt(gx, gy, this.grid)) {
-      if (c.gx < 0 || c.gy < 0 || c.gx >= this.grid.zoneCols || c.gy >= this.grid.zoneRows) return Infinity;
-      if (this.roads.isRoad(c.gx, c.gy)) n++;
+    for (const heading of [0, Math.PI / 2]) {
+      let h = 0;
+      for (const c of shovel.footprintAt(gx, gy, this.grid, heading)) {
+        if (c.gx < 0 || c.gy < 0 || c.gx >= this.grid.zoneCols || c.gy >= this.grid.zoneRows) return Infinity;
+        if (this.roads.isRoad(c.gx, c.gy)) h++;
+      }
+      n = Math.max(n, h);
     }
     return n;
   }
 
   // A sub-zone of block (bx,by) where the shovel can sit. Prefers the cell matching
-  // its current parity, and a body that fully clears every road. When `relaxed`,
-  // falls back to the in-bounds sub-zone with the *fewest* road cells (so a shovel
-  // boxed in by roads still relocates and keeps working rather than idling). Returns
-  // { gx, gy } | null.
-  _shovelPlacement(shovel, bx, by, relaxed = false) {
+  // its current parity. The body must fully clear every road (a shovel never blocks
+  // a lane) AND leave at least one open cell against it for a truck to dock —
+  // otherwise the spot is worthless and we keep looking. Returns { gx, gy } | null.
+  _shovelPlacement(shovel, bx, by) {
     const xs = (shovel.gx % 2) === 0 ? [0, 1] : [1, 0];
     const ys = (shovel.gy % 2) === 0 ? [0, 1] : [1, 0];
-    let fallback = null, fewest = Infinity;
     for (const oy of ys)
       for (const ox of xs) {
         const gx = bx * 2 + ox;
         const gy = by * 2 + oy;
-        const roads = this._footprintRoadCount(shovel, gx, gy);
-        if (roads === 0) return { gx, gy };                        // body fully off the roads
-        if (relaxed && roads < fewest) { fewest = roads; fallback = { gx, gy }; }
+        if (this._footprintRoadCount(shovel, gx, gy) !== 0) continue;   // body fully off the roads
+        if (!this._placeAccessible(shovel, gx, gy)) continue;           // trucks must be able to come
+        return { gx, gy };
       }
-    return relaxed ? fallback : null;
+    return null;
+  }
+
+  // Can a truck come alongside the shovel's body centred on (gx,gy)? True when at
+  // least one in-bounds cell orthogonally touching the footprint is not a crusher
+  // cell — i.e. there is somewhere to dock/load from. Rejects placements jammed
+  // into a map corner or against a crusher, which trucks could never service.
+  _placeAccessible(shovel, gx, gy) {
+    const occ = new Set(shovel.footprintAt(gx, gy, this.grid).map((c) => key(c.gx, c.gy)));
+    const onCrusher = (nx, ny) => (this.roads.crushers || []).some(
+      (cr) => nx >= cr.x && nx < cr.x + cr.w && ny >= cr.y && ny < cr.y + cr.h);
+    for (const cstr of occ) {
+      const [cx, cy] = cstr.split(',').map(Number);
+      for (const [dx, dy] of DIRS) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= this.grid.zoneCols || ny >= this.grid.zoneRows) continue;
+        if (occ.has(key(nx, ny)) || onCrusher(nx, ny)) continue;
+        return true;
+      }
+    }
+    return false;
   }
 
   // Best EXPLORED ore block within `R` blocks (Chebyshev) of (bx,by) for `shovel`
   // to move to. Never reveals undrilled ground, never a block on a road, and only
-  // blocks where a road-clear placement exists for this shovel's body. Priority:
-  // road access first, then nearest, then richest. Returns { bx, by, place } | null.
-  _bestOreInRadius(shovel, bx, by, R, relaxed = false) {
+  // blocks where a road-clear, truck-accessible placement exists for this shovel's
+  // body. Priority: road access first, then nearest, then richest. Returns
+  // { bx, by, place } | null.
+  _bestOreInRadius(shovel, bx, by, R) {
+    // Blocks another shovel already works or is relocating to — two shovels must
+    // never stack onto the same ore block (they'd fight over it and jam traffic).
+    const claimed = new Set();
+    for (const s of this.shovels) {
+      if (s === shovel) continue;
+      const sb = this._shovelBlock(s);
+      claimed.add(`${sb.bx},${sb.by}`);
+    }
     let best = null;
     for (let dy = -R; dy <= R; dy++) {
       for (let dx = -R; dx <= R; dx++) {
         if (dx === 0 && dy === 0) continue;
         const nbx = bx + dx;
         const nby = by + dy;
+        if (claimed.has(`${nbx},${nby}`)) continue;       // another shovel's block
         const b = this.hooks.getBlock(nbx, nby);
         if (!(b && b.explored && b.ore && b.oreRemaining > 0)) continue;
-        if (!relaxed && this._blockOnRoad(nbx, nby)) continue;   // strict: never sit on a road
-        const place = this._shovelPlacement(shovel, nbx, nby, relaxed);
-        if (!place) continue;                            // body would straddle a road
+        if (this._blockOnRoad(nbx, nby)) continue;        // never sit on a road
+        const place = this._shovelPlacement(shovel, nbx, nby);
+        if (!place) continue;                            // body would straddle a road / be unreachable
         const hasRoad = this._bayCells(nbx * 2, nby * 2, nbx * 2 + 1, nby * 2 + 1).size > 0;
         const dist = Math.max(Math.abs(dx), Math.abs(dy));
         const cand = { bx: nbx, by: nby, ore: b.oreRemaining, hasRoad, dist, place };
@@ -302,7 +337,11 @@ class Autopilot {
   }
 
   // The worn cell SHORTEST to reach by road (one-way aware), that another grader
-  // isn't already heading for (so several graders disperse). Off-network/unreachable
+  // isn't already heading for. Cells ≥ SPREAD from every claimed cell are preferred
+  // (graders fan out to distinct areas); unclaimed cells inside a claimed area are
+  // the fallback (several graders may share one big cluster, but never one cell).
+  // With every worn cell claimed, returns null — the spare grader goes and rests
+  // at the pad instead of stacking onto a colleague's job. Off-network/unreachable
   // cells fall back to crow-flies distance, ranked after every reachable one.
   _pickGraderTarget(grader, worn, claimed) {
     if (!worn.size) return null;
@@ -313,19 +352,21 @@ class Autopilot {
       return r != null ? r : 1e6 + Math.abs(a.gx - gx) + Math.abs(a.gy - gy);
     };
     const SPREAD = 10;
-    let best = null, bestD = Infinity, nearest = null, nearestD = Infinity;
+    let best = null, bestD = Infinity;     // unclaimed, clear of every claimed area
+    let spare = null, spareD = Infinity;   // unclaimed, but inside a claimed area
     for (const wk of worn) {
+      if (claimed.has(wk)) continue;                   // exact cell already owned
       const [gx, gy] = wk.split(',').map(Number);
       const d = distOf(gx, gy);
-      if (d < nearestD) { nearestD = d; nearest = wk; }
       let clear = true;
       for (const ck of claimed) {
         const [cx, cy] = ck.split(',').map(Number);
         if (Math.abs(cx - gx) + Math.abs(cy - gy) < SPREAD) { clear = false; break; }
       }
-      if (clear && d < bestD) { bestD = d; best = wk; }
+      if (clear) { if (d < bestD) { bestD = d; best = wk; } }
+      else if (d < spareD) { spareD = d; spare = wk; }
     }
-    return best || nearest;
+    return best || spare;
   }
 
   // The goal cell-set (+ a representative point) for a grader: its worn-cell target,
@@ -527,14 +568,25 @@ class Autopilot {
     if (on) this._selected.add(v); else this._selected.delete(v);
   }
 
+  // One AXIS-ALIGNED step of a shovel relocation (never diagonal, so the shovel
+  // always settles facing along an axis and its footprint matches what
+  // _footprintRoadCount planned for). Longest remaining axis first; if that step
+  // is blocked, try the other axis, else wait.
   _shovelStep(shovel) {
     const t = this._shovelMove.get(shovel);
     if (!t) return null;
     const cx = shovel.moving ? shovel.tgx : shovel.gx;
     const cy = shovel.moving ? shovel.tgy : shovel.gy;
-    const dx = Math.sign(t.gx - cx);
-    const dy = Math.sign(t.gy - cy);
-    return (dx === 0 && dy === 0) ? null : [dx, dy];
+    const dx = t.gx - cx;
+    const dy = t.gy - cy;
+    if (dx === 0 && dy === 0) return null;
+    const opts = [];
+    if (dx !== 0) opts.push([Math.sign(dx), 0]);
+    if (dy !== 0) opts.push([0, Math.sign(dy)]);
+    if (opts.length === 2 && Math.abs(dy) > Math.abs(dx)) opts.reverse();
+    for (const [mx, my] of opts)
+      if (this._canOccupy(shovel, cx + mx, cy + my, mx, my)) return [mx, my];
+    return opts[0];   // blocked — keep asking; the obstacle will clear
   }
 
   _ensure(truck) {
@@ -566,11 +618,17 @@ class Autopilot {
     // A road-travel phase assumes the truck is on the network. If it isn't (e.g.
     // the player released it mid-dock), walk it back to the nearest road first —
     // the road autopilot can't route from an off-road cell.
+    // A truck deliberately waiting OFF-road beside a full pad is exempt — walking
+    // it back onto the network would fight _tickOverflow forever.
+    const overflowing = st.phase === 'to_parking' && st.overPark;
     const roadPhase = st.phase === 'to_shovel' || st.phase === 'to_crusher' || st.phase === 'to_parking';
-    if (roadPhase && !this.roads.isRoad(truck.gx, truck.gy) && !truck.moving) {
+    if (roadPhase && !overflowing && !this.roads.isRoad(truck.gx, truck.gy) && !truck.moving) {
       truck.offroad = true;
       const target = this._nearestRoadCell(truck);
-      st.dir = target ? this._offroadStep(truck, target) : null;
+      // Greedy first; when every distance-reducing step is blocked (e.g. two
+      // off-road trucks facing each other), fall back to a short BFS that routes
+      // AROUND the obstacle — a truck must never stay stranded off the network.
+      st.dir = target ? (this._offroadStep(truck, target) || this._dodgeStep(truck, target)) : null;
       return;
     }
 
@@ -657,10 +715,19 @@ class Autopilot {
       st.phase = 'undocking'; st.undockThen = truck.load > 0 ? 'to_crusher' : 'to_parking'; st.dir = null; return;
     }
     if (!truck.moving && this._adjacentToShovel(truck, shovel)) {
-      st.phase = 'loading'; st.timer = 0; st.bucket = 0; truck.load = 0; st.dir = null; return;
+      st.phase = 'loading'; st.timer = 0; st.bucket = 0; truck.load = 0; st.dir = null; st.dockStuck = 0; return;
     }
     const bay = this._shovelDockBay(truck, shovel);
     st.dir = bay ? this._offroadStep(truck, bay) : null;
+    // A docking truck HOLDS the shovel lock. If it can't actually reach the
+    // shovel (boxed in by the queue), it must not starve everyone else — give
+    // the lock back and rejoin the road; another truck takes its turn.
+    if (!st.dir && !truck.moving) {
+      if ((st.dockStuck = (st.dockStuck || 0) + 1) > 60) {
+        this._unlockShovel(shovel, truck);
+        st.phase = 'undocking'; st.undockThen = 'to_shovel'; st.dockStuck = 0;
+      }
+    } else st.dockStuck = 0;
   }
 
   // Off-road return: drive the truck back to the road cell it docked from (or any
@@ -954,7 +1021,8 @@ class Autopilot {
     if (this._redirectIfUseful(truck, st)) return;
 
     const slot = this._parkSlot(truck);
-    if (!slot) { st.dir = null; return; }
+    if (!slot) { this._tickOverflow(truck, st); return; }   // pad full → wait beside it
+    st.overPark = null;
     const goals = new Set([key(slot.gx, slot.gy)]);
     const gid = `P:${slot.gx},${slot.gy}`;
     const a = this._advance(truck, goals, gid, null);
@@ -962,11 +1030,78 @@ class Autopilot {
     this._advanceTail(truck, goals, gid, st, a);
   }
 
+  // The pad is completely full. Rather than stopping dead on a road (or in the
+  // middle of the pad, boxing parked trucks in), the truck pulls OFF the network
+  // to a clear spot just outside the pad and waits there nose-up. It keeps
+  // re-checking: a freed slot (or a new job, via _redirectIfUseful) resumes it.
+  _tickOverflow(truck, st) {
+    truck.task = null;
+    st.want = null;
+    st.dir = null;
+    if (truck.moving) return;
+    const a = this._logical(truck);
+    let t = st.overPark;
+    if (!t || !(a.gx === t.gx && a.gy === t.gy) && !this._overflowSpotOk(truck, t.gx, t.gy)) {
+      t = st.overPark = this._overflowSpot(truck);
+    }
+    if (!t) return;                                      // boxed in — hold
+    if (a.gx === t.gx && a.gy === t.gy) {                // waiting beside the pad
+      truck.offroad = false; truck.heading = PARK_HEADING; return;
+    }
+    truck.offroad = true;
+    st.dir = this._offroadStep(truck, t) || this._dodgeStep(truck, t);
+  }
+
+  // Is (gx,gy) still a valid waiting spot for this truck? Whole parked footprint
+  // in bounds, off every road and pad, off the crushers, clear of stationary
+  // vehicles — and clear of every OTHER waiting truck's claimed footprint (two
+  // adjacent spots physically overlap through the rear cell, so claims must
+  // exclude by overlap, not by exact cell; claims hold even while the claimant
+  // is still driving over, which keeps spot choices stable instead of trucks
+  // re-planning against each other every tick).
+  _overflowSpotOk(truck, gx, gy, occ = this._stationaryOcc(truck)) {
+    const cells = new Set();
+    for (const c of truck.collisionCells(gx, gy, this.grid, PARK_HEADING)) {
+      if (c.gx < 0 || c.gy < 0 || c.gx >= this.grid.zoneCols || c.gy >= this.grid.zoneRows) return false;
+      if (this.roads.isRoad(c.gx, c.gy) || this._onCrusher(c.gx, c.gy)) return false;
+      if (occ.has(key(c.gx, c.gy))) return false;
+      cells.add(key(c.gx, c.gy));
+    }
+    for (const [t2, st2] of this.state) {
+      if (t2 === truck || !st2.overPark) continue;
+      for (const c of t2.collisionCells(st2.overPark.gx, st2.overPark.gy, this.grid, PARK_HEADING))
+        if (cells.has(key(c.gx, c.gy))) return false;
+    }
+    return true;
+  }
+
+  // Nearest clear off-road waiting spot (expanding ring around the truck).
+  _overflowSpot(truck) {
+    const a = this._logical(truck);
+    const occ = this._stationaryOcc(truck);
+    for (let r = 1; r <= 10; r++) {
+      let best = null, bestD = Infinity;
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const gx = a.gx + dx, gy = a.gy + dy;
+          if (!this._overflowSpotOk(truck, gx, gy, occ)) continue;
+          const d = Math.abs(dx) + Math.abs(dy);
+          if (d < bestD) { bestD = d; best = { gx, gy }; }
+        }
+      if (best) return best;
+    }
+    return null;
+  }
+
   // If the truck can do something useful right now, switch its phase and return
   // true. Loaded → deliver at the crusher; empty → fetch ore from its shovel.
   // Reachability ignores other vehicles so a momentary jam never blocks a redirect.
+  // A truck waiting off-road (overflow parking) tests from the nearest road cell —
+  // once redirected, the off-road recovery walks it back onto the network.
   _redirectIfUseful(truck, st) {
-    const from = this._logical(truck);
+    let from = this._logical(truck);
+    if (!this.roads.isRoad(from.gx, from.gy)) from = this._nearestRoadCell(truck) || from;
     if (truck.load > 0) {
       if (this._reachStatic(from, this._crusherGoals(), 'C')) {
         this._releaseSlot(truck); st.phase = 'to_crusher'; st.dir = null; st.stuck = 0; return true;
@@ -1228,27 +1363,95 @@ class Autopilot {
   _buildSlots() {
     this._slots = [];
     this._slotByTruck = new Map();
-    // "En bataille" grid: nose-up trucks one column apart (their narrow side) and
-    // two rows apart (so a truck's body + rear cell clears the row in front),
+    // "En bataille" grid: nose-up trucks one column apart (their narrow side),
+    // ranks two rows apart, body + rear cell always inside the pad (padSlots),
     // filling the pad in tidy aligned ranks.
-    for (const p of this.roads.parkings || [])
-      for (let gy = p.y; gy <= p.y + p.h - 1; gy += 2)
-        for (let gx = p.x; gx < p.x + p.w; gx++)
-          this._slots.push({ gx, gy });
+    for (const p of this.roads.parkings || []) this._slots.push(...padSlots(p));
   }
 
+  // Cells covered by every STATIONARY vehicle other than `self` — used to test
+  // whether a parking slot is genuinely takeable. Moving vehicles are ignored
+  // (they'll clear the cell on their own), so a truck merely driving across the
+  // pad never makes slot assignments flip-flop.
+  _stationaryOcc(self) {
+    const set = new Set();
+    for (const v of (this.hooks.allVehicles ? this.hooks.allVehicles() : [])) {
+      if (v === self || v.moving) continue;
+      for (const c of v.occupiedCells(this.grid)) set.add(key(c.gx, c.gy));
+    }
+    return set;
+  }
+
+  // Would `truck`, parked nose-up on (gx,gy), overlap a stationary vehicle?
+  _slotClear(truck, gx, gy, occ) {
+    for (const c of truck.collisionCells(gx, gy, this.grid, PARK_HEADING))
+      if (occ.has(key(c.gx, c.gy))) return false;
+    return true;
+  }
+
+  _inPad(gx, gy) {
+    for (const p of this.roads.parkings || [])
+      if (gx >= p.x && gx < p.x + p.w && gy >= p.y && gy < p.y + p.h) return true;
+    return false;
+  }
+
+  _onCrusher(gx, gy) {
+    return (this.roads.crushers || []).some(
+      (cr) => gx >= cr.x && gx < cr.x + cr.w && gy >= cr.y && gy < cr.y + cr.h);
+  }
+
+  // Every cell a truck parked nose-up on (gx,gy) would reserve (body + rear)
+  // lies inside a pad — so a parked truck can never spill onto a road running
+  // along the pad's edge and block it.
+  _padParkable(truck, gx, gy) {
+    for (const c of truck.collisionCells(gx, gy, this.grid, PARK_HEADING))
+      if (!this._inPad(c.gx, c.gy)) return false;
+    return true;
+  }
+
+  // The slot this truck should park on. Sticky once assigned, but re-validated
+  // against the real occupancy: a slot squatted by anything stationary (the LV,
+  // a resting grader, a manually-parked or broken truck…) is abandoned and the
+  // NEAREST free slot is picked instead — the truck never drives into a blocked
+  // slot and idles against it. With every formal slot taken, any pad cell whose
+  // whole parked footprint fits the pad is used; a genuinely FULL pad returns
+  // null and the truck waits beside it (see _tickOverflow).
   _parkSlot(truck) {
     if (!this._slots) this._buildSlots();
-    let s = this._slotByTruck.get(truck);
+    const occ = this._stationaryOcc(truck);
+    const cur = this._slotByTruck.get(truck);
+    if (cur && this._padParkable(truck, cur.gx, cur.gy) && this._slotClear(truck, cur.gx, cur.gy, occ)) return cur;
+    if (cur) this._slotByTruck.delete(truck);          // blocked → repick below
+    const taken = new Set([...this._slotByTruck.values()].map((v) => key(v.gx, v.gy)));
+    const a = this._logical(truck);
+    const pick = (cells) => {
+      let best = null, bestD = Infinity;
+      for (const s of cells) {
+        if (taken.has(key(s.gx, s.gy))) continue;
+        if (!this._padParkable(truck, s.gx, s.gy)) continue;
+        if (!this._slotClear(truck, s.gx, s.gy, occ)) continue;
+        const d = Math.abs(a.gx - s.gx) + Math.abs(a.gy - s.gy);
+        if (d < bestD) { bestD = d; best = { gx: s.gx, gy: s.gy }; }
+      }
+      return best;
+    };
+    let s = pick(this._slots);
     if (!s) {
-      const taken = new Set([...this._slotByTruck.values()].map((v) => key(v.gx, v.gy)));
-      s = this._slots.find((v) => !taken.has(key(v.gx, v.gy)));
-      if (s) this._slotByTruck.set(truck, s);
+      const padCells = [];
+      for (const p of this.roads.parkings || [])
+        for (let gy = p.y; gy < p.y + p.h; gy++)
+          for (let gx = p.x; gx < p.x + p.w; gx++) padCells.push({ gx, gy });
+      s = pick(padCells);
     }
+    if (s) this._slotByTruck.set(truck, s);
     return s ?? null;
   }
 
-  _releaseSlot(truck) { if (this._slotByTruck) this._slotByTruck.delete(truck); }
+  _releaseSlot(truck) {
+    if (this._slotByTruck) this._slotByTruck.delete(truck);
+    const st = this.state.get(truck);
+    if (st) st.overPark = null;                    // free the waiting spot too
+  }
 
   // Distance field: shortest road distance (respecting one-way flow) from every
   // cell that can legally reach `goals`. Built by a reverse BFS from the goal

@@ -19,7 +19,7 @@ const {
   BREAKDOWN_CHANCE, REPAIR_TIME,
   ORE_VALUE, PARKING, PARK_HEADING,
   EXCAVATORS, SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
-  DIRS, key, rectsOverlap,
+  DIRS, key, padSlots, rectsOverlap,
 } = require('./constants');
 
 class World {
@@ -80,6 +80,7 @@ class World {
       getBlock: (bx, by) => this.mine.blocks[by]?.[bx],
       mineBlock: (bx, by, amount) => this._mineBlock(bx, by, amount),
       deliver: (ore, tons, crusherIdx) => this._deliver(ore, tons, crusherIdx),
+      allVehicles: () => this.vehicles,
     });
     this.autopilot.addShovel(hex1);
     this.autopilot.addShovel(hex2);
@@ -188,6 +189,7 @@ class World {
       getBlock: (bx, by) => this.mine.blocks[by]?.[bx],
       mineBlock: (bx, by, amount) => this._mineBlock(bx, by, amount),
       deliver: (ore, tons, crusherIdx) => this._deliver(ore, tons, crusherIdx),
+      allVehicles: () => this.vehicles,
     });
     for (const v of this.vehicles) if (v.type === 'excavator') this.autopilot.addShovel(v);
     for (const [tl, sl] of snap.links || []) {
@@ -823,13 +825,11 @@ class World {
     const occ = (gx, gy) => this.vehicles.some((v) => v.gx === gx && v.gy === gy);
     if (type === 'oht' || type === 'pickup') {
       const pads = this.roads.parkings && this.roads.parkings.length ? this.roads.parkings : [P];
-      // Prefer a tidy "en bataille" slot — nose-up, ranks two cells apart so a
-      // truck's body clears the rank in front. A 3-tall pad holds two ranks; taller
-      // pads add more. A freshly-bought truck therefore spawns already well-parked.
+      // Prefer a tidy "en bataille" slot — nose-up ranks, body + rear cell fully
+      // inside the pad (padSlots). A freshly-bought truck spawns already well-parked.
       for (const p of pads)
-        for (let gy = p.y; gy <= p.y + p.h - 1; gy += 2)
-          for (let gx = p.x; gx < p.x + p.w; gx++)
-            if (!occ(gx, gy)) return { gx, gy };
+        for (const s of padSlots(p))
+          if (!occ(s.gx, s.gy)) return { gx: s.gx, gy: s.gy };
       // Every rank slot taken → fall back to any free cell inside the pad.
       for (const p of pads)
         for (let gy = p.y; gy < p.y + p.h; gy++)

@@ -4,6 +4,7 @@ import {
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
 } from '../../../game/world.js';
 import { sizedParkingRect } from '../../../game/world-setup.js';
+import { padSlots } from '../../../game/constants.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -279,6 +280,32 @@ describe('Autopilot — grader auto-repair', () => {
     const t1 = ap._graderState.get(g1).target;
     const t2 = ap._graderState.get(g2).target;
     expect(t1).not.toBe(t2);                          // spread, not stacked on one cell
+  });
+
+  it('sends a spare grader to rest instead of stacking on a claimed cell', () => {
+    const { roads, ap } = longRoad();
+    for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(30, 20);   // a single worn cell
+    const g1 = grader(10, 20);
+    const g2 = grader(12, 20);
+    ap.addGrader(g1); ap.addGrader(g2);
+    ap._updateGraders();
+    const targets = [g1, g2].map((v) => ap._graderState.get(v).target);
+    expect(targets.filter((t) => t === '30,20').length).toBe(1);  // exactly one grader takes the job
+    expect(targets.filter((t) => t === null).length).toBe(1);     // the other goes and rests
+  });
+
+  it('lets several graders share one big worn cluster on distinct cells', () => {
+    const { roads, ap } = longRoad();
+    for (const x of [28, 29, 30]) for (let i = 0; i < ROAD_WEAR_LIMIT; i++) roads.wearPass(x, 20);
+    const g1 = grader(10, 20);
+    const g2 = grader(12, 20);
+    ap.addGrader(g1); ap.addGrader(g2);
+    ap._updateGraders();
+    const t1 = ap._graderState.get(g1).target;
+    const t2 = ap._graderState.get(g2).target;
+    expect(t1).toBeTruthy();
+    expect(t2).toBeTruthy();
+    expect(t1).not.toBe(t2);                          // same area is fine, same cell is not
   });
 
   it('parks a grader (null target) when no road is degraded', () => {
@@ -681,7 +708,8 @@ describe('World — shop, assignment, manual control', () => {
     expect(t.moving).toBe(false);
     expect(t.heading).toBe(parkHeading);                  // nose-up like the rest of the fleet
     const pad = w.roads.parkings[0];
-    expect((t.gy - pad.y) % 2).toBe(0);                   // sits on a rank row, not the aisle
+    // Sits on a rank slot (bottom-anchored so body + rear cell stay inside the pad).
+    expect(padSlots(pad).some((s) => s.gx === t.gx && s.gy === t.gy)).toBe(true);
     expect(t.gx).toBeGreaterThanOrEqual(pad.x);
     expect(t.gx).toBeLessThan(pad.x + pad.w);
   });
@@ -1190,6 +1218,13 @@ describe('World — shovel relocation', () => {
     here.explored = true; here.ore = null; here.oreRemaining = 0;
     const next = w.mine.blocks[by][bx + 1];
     next.explored = true; next.ore = 'iron'; next.orePct = 50; next.oreRemaining = 5000;
+    // Keep the other shovels productive on their own blocks so none of them
+    // relocates to (and claims) the test's ore block — shovels never stack.
+    for (const lbl of ['HEX02', 'HEX03', 'HEX04']) {
+      const s = w.byLabel.get(lbl);
+      const b = w.mine.blocks[Math.floor(s.gy / 2)][Math.floor(s.gx / 2)];
+      b.explored = true; b.ore = 'iron'; b.orePct = 50; b.oreRemaining = 5000;
+    }
     return { w, hex, bx, by };
   }
 
@@ -1243,6 +1278,22 @@ describe('World — shovel relocation', () => {
     w.mine.blocks[by][bx + 1].oreRemaining = 0; // someone else mined it out
     w.autopilot._updateShovels();
     expect(w.autopilot._shovelMove.has(hex)).toBe(false);
+  });
+
+  it('never relocates two shovels onto the same ore block', () => {
+    const { w, hex } = setupShovel();                  // HEX01 will claim the ore block east of it
+    const h2 = w.byLabel.get('HEX02');
+    const b2 = w.mine.blocks[Math.floor(h2.gy / 2)][Math.floor(h2.gx / 2)];
+    b2.ore = null; b2.oreRemaining = 0;                // HEX02 idle too — hunting for ore
+    w.autopilot._updateShovels();
+    const m1 = w.autopilot._shovelMove.get(hex);
+    expect(m1).toBeTruthy();
+    const m2 = w.autopilot._shovelMove.get(h2);
+    if (m2) {
+      const same = Math.floor(m2.gx / 2) === Math.floor(m1.gx / 2)
+                && Math.floor(m2.gy / 2) === Math.floor(m1.gy / 2);
+      expect(same).toBe(false);
+    }
   });
 
   it('prefers a truck-accessible ore block over an equally-near inaccessible one', () => {
@@ -1301,6 +1352,45 @@ describe('World — parking alignment & resize', () => {
     expect(small.w * Math.ceil(small.h / 2)).toBeGreaterThanOrEqual(6);
     const big = sizedParkingRect(w.grid, 40);       // needs 60 slots → must grow
     expect(big.w * Math.ceil(big.h / 2)).toBeGreaterThanOrEqual(60);
+  });
+
+  it('keeps every slot footprint (body + rear cell) inside the pad', () => {
+    // Bottom-anchored ranks: a parked truck's rear cell must never spill onto a
+    // road running along the pad's lower edge.
+    for (const p of [{ x: 3, y: 2, w: 6, h: 3 }, { x: 0, y: 0, w: 4, h: 5 }, { x: 2, y: 2, w: 3, h: 2 }]) {
+      const slots = padSlots(p);
+      expect(slots.length).toBeGreaterThan(0);
+      for (const s of slots) {
+        expect(s.gy).toBeGreaterThanOrEqual(p.y);
+        expect(s.gy + 1).toBeLessThan(p.y + p.h);      // rear cell inside too
+      }
+    }
+  });
+
+  it('never assigns a slot squatted by another stationary vehicle', () => {
+    const w = new World();
+    const oht = w.byLabel.get('OHT01');
+    oht.gx = oht.tgx = 20; oht.gy = oht.tgy = 20; oht.moving = false; oht.place(w.grid);
+    const lv = w.byLabel.get('LV01');                  // the pickup parks right on OHT01's old slot
+    lv.gx = lv.tgx = 3; lv.gy = lv.tgy = 3; lv.moving = false; lv.place(w.grid);
+    const s = w.autopilot._parkSlot(oht);
+    expect(s).toBeTruthy();
+    expect(`${s.gx},${s.gy}`).not.toBe('3,3');         // picked a different, genuinely free slot
+  });
+
+  it('a truck with no free slot waits off-road beside the pad, never blocking a road', () => {
+    const w = new World();
+    const ap = w.autopilot;
+    const oht = w.byLabel.get('OHT01');
+    const st = ap.state.get(oht);
+    st.phase = 'to_parking';
+    ap._parkSlot = () => null;                         // pretend the pad is completely full
+    for (let i = 0; i < 800; i++) w.tick(1 / 30);
+    expect(st.overPark).toBeTruthy();                  // it picked a waiting spot…
+    expect(oht.gx).toBe(st.overPark.gx);               // …reached it…
+    expect(oht.gy).toBe(st.overPark.gy);
+    for (const c of oht.collisionCells(oht.gx, oht.gy, w.grid))
+      expect(w.roads.isRoad(c.gx, c.gy)).toBe(false);  // …and sits fully clear of the network
   });
 
   it('lays nose-up slots one column apart and two rows apart', () => {

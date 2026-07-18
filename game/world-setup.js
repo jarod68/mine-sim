@@ -7,7 +7,7 @@
 // off `this`, which makes each routine independently testable.
 
 const { setOre } = require('./mine');
-const { COLS, ROWS, PARKING, PARK_HEADING, PARK_BLOCKS } = require('./constants');
+const { COLS, ROWS, PARKING, PARK_HEADING, PARK_BLOCKS, padSlots } = require('./constants');
 
 // Chebyshev block distance from (bx,by) to the parking footprint (0 inside it).
 function blockDistToParking(bx, by) {
@@ -64,7 +64,9 @@ function sizedParkingRect(grid, n) {
   const needed = Math.ceil(n * 1.5);
   const { x, y } = PARKING;
   let { w, h } = PARKING;
-  const capacity = () => w * Math.ceil(h / 2);
+  // Real slot capacity: ranks are two rows apart AND fully inside the pad
+  // (body + rear cell), so a pad holds w × floor(h/2) trucks.
+  const capacity = () => padSlots({ x, y, w, h }).length;
   let guard = 0;
   while (capacity() < needed && guard++ < 200) {
     if (w < 10 && w + x < grid.zoneCols - 1) w += 1;
@@ -78,9 +80,7 @@ function sizedParkingRect(grid, n) {
 // bottom — so the default fleet starts neatly "en bataille".
 function placeTrucksInParking(grid, roads, trucks) {
   const slots = [];
-  for (const p of roads.parkings)
-    for (let gy = p.y; gy <= p.y + p.h - 1; gy += 2)
-      for (let gx = p.x; gx < p.x + p.w; gx++) slots.push({ gx, gy });
+  for (const p of roads.parkings) slots.push(...padSlots(p));
   trucks.forEach((t, i) => {
     const s = slots[Math.min(i, slots.length - 1)] || { gx: PARKING.x, gy: PARKING.y };
     t.gx = s.gx; t.gy = s.gy; t.tgx = s.gx; t.tgy = s.gy; t.fromGx = s.gx; t.fromGy = s.gy;
