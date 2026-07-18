@@ -573,6 +573,43 @@ describe('Autopilot — head-on deadlock', () => {
     expect(new Set(tail).size).toBe(1);
   });
 
+  it('never side-steps onto another road (no runaway march down a crossing lane)', () => {
+    const g = grid();
+    const roads = new Roads(g);
+    const cells = [{ gx: 10, gy: 10 }, { gx: 11, gy: 10 }];        // the jammed lane (E-W)
+    for (let gy = 5; gy <= 15; gy++) cells.push({ gx: 10, gy });   // a crossing N-S lane
+    roads.setNetwork(cells);
+    const ap = new Autopilot(g, roads, {});
+    ap.isFree = () => true;
+    const t = fakeTruck(10, 10);
+    // both perpendicular cells are road → hold rather than wander down the lane
+    expect(ap._sideStepOff(t, { gx: 10, gy: 10 }, [1, 0])).toBeNull();
+    // on a plain lane, open ground beside it is fine
+    expect(ap._sideStepOff(t, { gx: 11, gy: 10 }, [1, 0])).toEqual([0, 1]);
+  });
+
+  it('abandons a yield when the opponent leaves the area or never passes', () => {
+    const g = grid();
+    const roads = new Roads(g);
+    const cells = [];
+    for (let x = 5; x <= 25; x++) cells.push({ gx: x, gy: 10 });
+    roads.setNetwork(cells);
+    const ap = new Autopilot(g, roads, {});
+    ap.isFree = () => true;
+    const A = fakeTruck(10, 10), B = fakeTruck(20, 10);
+    registerTruck(ap, A); registerTruck(ap, B);
+    const st = ap.state.get(A);
+    // opponent still "ahead along the axis" but 10 cells away → gone, resume
+    st.yield = { to: B, axis: [1, 0], parked: true };
+    expect(ap._yieldStep(A, st)).toBeNull();
+    expect(st.yield).toBeNull();
+    // opponent close but frozen → the hard timeout releases the yielder
+    B.gx = 12; B.tgx = 12;
+    st.yield = { to: B, axis: [1, 0], parked: true };
+    for (let i = 0; i < 241; i++) ap._yieldStep(A, st);
+    expect(st.yield).toBeNull();
+  });
+
   it('a long-gridlocked truck pulls off the road to clear the lane (anti-cascade)', () => {
     const g = grid();
     const roads = new Roads(g);
@@ -946,6 +983,73 @@ describe('World — collisions & live deltas', () => {
       expect(touched).toBe(false);                      // never drove onto the shovel
       expect([v.gx, v.gy]).toEqual([68, gy]);           // and still reached the far side
     }
+  });
+
+  it('move-to beelines straight across terrain, never detouring to follow roads', () => {
+    const w = new World();
+    const lv = w.byLabel.get('LV01');
+    lv.gx = lv.tgx = 50; lv.gy = lv.tgy = 50; lv.moving = false; lv.place(w.grid);
+    const path = w._planMovePath(lv, 90, 70);
+    expect(path).toBeTruthy();
+    // A direct route: within a small obstacle-bend tolerance of the Manhattan
+    // distance (a road-following route would be far longer).
+    expect(path.length - 1).toBeLessThanOrEqual(Math.abs(90 - 50) + Math.abs(70 - 50) + 6);
+  });
+
+  it('recovers a truck stranded far off-road back onto the network', () => {
+    const w = new World();
+    const oht = w.byLabel.get('OHT01');
+    // Strand it where no road exists within 9 cells (as an abandoned dodge or
+    // clear-lane manoeuvre might) — it must still find its way back, always.
+    let far = null;
+    for (let gy = 40; gy < w.grid.zoneRows && !far; gy++)
+      for (let gx = 40; gx < w.grid.zoneCols && !far; gx++) {
+        let clear = true;
+        for (let dy = -9; dy <= 9 && clear; dy++)
+          for (let dx = -9; dx <= 9 && clear; dx++)
+            if (w.roads.isRoad(gx + dx, gy + dy)) clear = false;
+        if (clear) far = { gx, gy };
+      }
+    expect(far).toBeTruthy();
+    oht.gx = oht.tgx = far.gx; oht.gy = oht.tgy = far.gy; oht.moving = false; oht.place(w.grid);
+    w.autopilot.state.get(oht).phase = 'to_crusher';
+    let backOn = false;
+    for (let i = 0; i < 3000 && !backOn; i++) { w.tick(1 / 30); backOn = w.roads.isRoad(oht.gx, oht.gy); }
+    expect(backOn).toBe(true);
+  });
+
+  it('manual steering always frees a boxed-in vehicle (drives through the blockade)', () => {
+    const w = new World();
+    const oht = w.byLabel.get('OHT01');
+    oht.gx = oht.tgx = 30; oht.gy = oht.tgy = 30; oht.moving = false; oht.place(w.grid);
+    // Box it in on all four sides with stationary vehicles (noses toward it, so
+    // their rear collision cells extend outward — the tightest possible cage).
+    const cage = [['OHT02', 31, 30, Math.PI], ['OHT03', 29, 30, 0], ['OHT04', 30, 31, -Math.PI / 2], ['LV01', 30, 29, Math.PI / 2]];
+    for (const [label, gx, gy, heading] of cage) {
+      const v = w.byLabel.get(label);
+      v.gx = v.tgx = gx; v.gy = v.tgy = gy; v.moving = false; v.heading = heading; v.place(w.grid);
+      w.autopilot.setManual(v);
+    }
+    w.control('OHT01', { dir: [1, 0] });
+    for (let i = 0; i < 120; i++) w.tick(1 / 30);
+    expect(oht.gx).toBeGreaterThan(30);              // escaped east straight through
+  });
+
+  it('a move-to order crosses a blockade instead of giving up', () => {
+    const w = new World();
+    const lv = w.byLabel.get('LV01');
+    lv.gx = lv.tgx = 40; lv.gy = lv.tgy = 40; lv.moving = false; lv.place(w.grid);
+    // A solid wall of stationary trucks right across the direct route.
+    ['OHT01', 'OHT02', 'OHT03', 'OHT04'].forEach((label, i) => {
+      const v = w.byLabel.get(label);
+      v.gx = v.tgx = 44; v.gy = v.tgy = 38 + i; v.moving = false; v.heading = 0; v.place(w.grid);
+      w.autopilot.setManual(v);
+    });
+    w.moveTo('LV01', 48, 40);
+    let done = false;
+    for (let i = 0; i < 2000 && !done; i++) { w.tick(1 / 30); done = !w._moveTo.has(lv); }
+    expect(done).toBe(true);
+    expect([lv.gx, lv.gy]).toEqual([48, 40]);
   });
 
   it('manual driving cancels an active move order', () => {

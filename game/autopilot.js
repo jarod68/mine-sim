@@ -541,6 +541,7 @@ class Autopilot {
     }
     if (truck.moving) return;                              // finish the current hop
     const a = this._logical(truck);
+    if (!this.roads.isRoad(a.gx, a.gy)) { st.dir = null; return; }   // already clear of the lane → hold
     const axis = [a.gx - st.giveWay.fromGx, a.gy - st.giveWay.fromGy];
     const side = this._sideStepOff(truck, a, axis);
     if (side) { truck.offroad = true; st.dir = side; return; }
@@ -790,20 +791,29 @@ class Autopilot {
     return best;
   }
 
-  // Closest free road cell to the truck (expanding ring), used as a fallback
-  // undock target if the docking road cell was lost.
+  // Closest road cell to the truck (expanding ring, WIDE radius — a truck must
+  // never be unrecoverable off-road, wherever a dodge or clear-lane left it).
+  // Prefers a cell it can occupy right now; if only busy road cells are near,
+  // keeps scanning a few more rings for a free one, then falls back to the
+  // nearest busy cell — stepping toward it simply queues until it clears.
   _nearestRoadCell(truck) {
     const a = this._logical(truck);
-    for (let r = 1; r <= 6; r++) {
+    let busy = null, busyRing = Infinity;
+    for (let r = 1; r <= 40; r++) {
+      if (busy && r > busyRing + 3) return busy;   // no free cell near the busy one
+      let free = null, freeD = Infinity;
       for (let dy = -r; dy <= r; dy++)
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const gx = a.gx + dx, gy = a.gy + dy;
           if (!this.roads.isRoad(gx, gy)) continue;
-          if (this._canOccupy(truck, gx, gy, 0, 0)) return { gx, gy };
+          const d = Math.abs(dx) + Math.abs(dy);
+          if (!busy) { busy = { gx, gy }; busyRing = r; }
+          if (d < freeD && this._canOccupy(truck, gx, gy, 0, 0)) { freeD = d; free = { gx, gy }; }
         }
+      if (free) return free;
     }
-    return null;
+    return busy;
   }
 
   // ── off-road dodge ──
@@ -1285,8 +1295,16 @@ class Autopilot {
     const a = this._logical(truck);
     const bl = this._logical(y.to);
     const proj = (bl.gx - a.gx) * y.axis[0] + (bl.gy - a.gy) * y.axis[1];
-    const adjacent = Math.abs(bl.gx - a.gx) + Math.abs(bl.gy - a.gy) <= 1;
-    if (proj < 0 || (!adjacent && proj === 0)) { st.yield = null; st.stuck = 0; truck.offroad = false; return null; } // passed → resume
+    const dist = Math.abs(bl.gx - a.gx) + Math.abs(bl.gy - a.gy);
+    const adjacent = dist <= 1;
+    // Resume when the opponent has passed — but ALSO when it left the area
+    // entirely (a positive projection can persist while it drives away along
+    // the axis) or after a hard timeout (the opponent may itself be stuck):
+    // a yielding truck must never hold its pocket forever.
+    y.ticks = (y.ticks || 0) + 1;
+    if (proj < 0 || (!adjacent && proj === 0) || dist > 6 || y.ticks > 240) {
+      st.yield = null; st.stuck = 0; truck.offroad = false; return null;   // resume
+    }
     if (truck.moving) return st.dir;          // finish the current hop
     if (y.parked) return null;                // tucked aside → hold until it passes
     let pocket = null, back = null;
@@ -1305,13 +1323,18 @@ class Autopilot {
     return null;                              // boxed in — wait
   }
 
-  // A free cell perpendicular to the conflict axis (road or not) the truck can pull
-  // into to clear a one-lane stand-off — used instead of reversing against the flow.
+  // A free OPEN-GROUND cell perpendicular to the conflict axis the truck can pull
+  // into to clear a one-lane stand-off — used instead of reversing against the
+  // flow. Never a road cell: pulling "aside" onto a crossing lane makes the next
+  // tick sidestep again from there, a runaway march down that lane that sent
+  // trucks drifting across the whole map. With no clear ground to either side the
+  // truck holds instead.
   _sideStepOff(truck, a, axis) {
     const perp = axis[0] === 0 ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
     for (const [dx, dy] of perp) {
       const gx = a.gx + dx, gy = a.gy + dy;
       if (gx < 0 || gy < 0 || gx >= this.grid.zoneCols || gy >= this.grid.zoneRows) continue;
+      if (this.roads.isRoad(gx, gy)) continue;
       if (this._canOccupy(truck, gx, gy, dx, dy)) return [dx, dy];
     }
     return null;

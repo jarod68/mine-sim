@@ -236,11 +236,15 @@ class World {
     this.autopilot.update(dt);
     for (const v of this.vehicles) {
       let dir = null;
+      // A direct player order (arrow keys or a move-to click) overrides vehicle
+      // collision: the player must ALWAYS be able to free a boxed-in vehicle, so
+      // it may drive through others (they still see and avoid its cells).
+      let force = false;
       if (v.broken) { dir = null; }                 // a broken-down asset is frozen in place
       else {
         const mv = this._moveStep(v);               // "move to point" override
-        if (mv !== undefined) dir = mv;
-        else if (v.manual && v.manualDir) dir = v.manualDir;
+        if (mv !== undefined) { dir = mv; force = true; }
+        else if (v.manual && v.manualDir) { dir = v.manualDir; force = true; }
         else if (this._dozerPrep.has(v)) dir = this._dozerStep(v);   // preparing a rich vein
         else if (this.autopilot.controls(v)) dir = this.autopilot.dirFor(v);
       }
@@ -249,7 +253,7 @@ class World {
         v.speedMul = (this.roads.isWorn(v.gx, v.gy) || (v.moving && this.roads.isWorn(v.tgx, v.tgy))) ? WORN_SPEED_MULT : 1;
       const pgx = v.gx, pgy = v.gy;
       const oldKeys = this._occKeys(v);
-      v.update(dt, dir, this.grid, isRoad, isFree);
+      v.update(dt, dir, this.grid, isRoad, force ? null : isFree);
       this._reindexOcc(v, oldKeys);
       if (v.gx !== pgx || v.gy !== pgy) this._roadPass(v);   // entered a new cell → wear / repair
     }
@@ -648,10 +652,12 @@ class World {
     this.autopilot.clearManual(v);          // resume hauling / shovel relocation
   }
 
-  // Weighted A* over the sub-zone grid from the vehicle to (tgx,tgy). Road cells
-  // cost 1, off-road cells more, so the route sticks to roads and only cuts
-  // off-road where it must. Crusher footprints are walls. Returns a cell path
-  // (start→target) or null if unreachable.
+  // A* over the sub-zone grid from the vehicle to (tgx,tgy). Every cell costs
+  // the same whether road or open ground, so a "move to point" beelines straight
+  // to the target, cutting across terrain. Crusher footprints are walls, and
+  // stationary obstacles carry penalties so the line bends around them — but the
+  // route never detours to follow a road. Returns a cell path (start→target) or
+  // null if unreachable.
   _planMovePath(v, tgx, tgy) {
     const { zoneCols, zoneRows } = this.grid;
     const sgx = v.moving ? v.tgx : v.gx;
@@ -684,7 +690,6 @@ class World {
         for (let dx = -1; dx <= 1; dx++) { const nk = key(fx + dx, fy + dy); if (!fixed.has(nk)) near.add(nk); }
     }
     near.delete(key(tgx, tgy));
-    const OFFROAD = 4;                      // off-road step cost (roads cost 1)
     const BUSY = 60;                        // a mobile vehicle in the way
     const NEAR = 80;                        // a cell hugging a stationary obstacle (keep clear)
     const BLOCKED = 800;                    // a stationary worker / broken asset → go around
@@ -706,7 +711,7 @@ class World {
         if (nx < 0 || ny < 0 || nx >= zoneCols || ny >= zoneRows) continue;
         if (walls.has(key(nx, ny))) continue;
         const k = key(nx, ny);
-        const ng = cur.g + (this.roads.isRoad(nx, ny) ? 1 : OFFROAD)
+        const ng = cur.g + 1
           + (fixed.has(k) ? BLOCKED : near.has(k) ? NEAR : busy.has(k) ? BUSY : 0);
         const nId = id(nx, ny);
         if (ng >= (g.get(nId) ?? Infinity)) continue;
