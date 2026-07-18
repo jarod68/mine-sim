@@ -82,8 +82,10 @@ the view so you can extend far. **🧽 Eraser** removes road (parking pads stay)
 
 Click **🛒 Buy assets** to expand the fleet (haul trucks, shovels, a scout, a
 **dozer**, a **grader**), up to 150 vehicles. A new shovel never spawns within 2
-blocks of another. You can also buy **extra crushers** (up to 5, $1,000,000 each)
-and click the map to place them.
+blocks of another, and a spent shovel **relocates on its own** to nearby explored
+ore — never settling on a road, always leaving room for trucks to come and load.
+You can also buy **extra crushers** (up to 5, $1,000,000 each) and click the map
+to place them.
 
 ![Buy-assets shop](docs/screenshots/shop.png)
 
@@ -92,10 +94,13 @@ and click the map to place them.
 - **Scroll** to zoom, **hold right-click** to pan.
 - **Click a vehicle** for details — assign a truck to a shovel, toggle its debug
   path. **Drive manually** with the arrow keys (light vehicles move diagonally);
-  haul trucks otherwise run on autopilot.
+  haul trucks otherwise run on autopilot. A manually-driven vehicle may **pass
+  through others**, so you can always free a boxed-in asset by hand.
 - **Move to a point:** with a vehicle selected, press <kbd>W</kbd> (or the
-  **🎯 Move to…** button), then click a destination — it routes there via the
-  shortest path, on roads and off-road where needed.
+  **🎯 Move to…** button), then click a destination — it **beelines straight
+  there across terrain** (no road-following detours), bending only around
+  crushers and parked machines, and passing through traffic rather than ever
+  getting stuck.
 - **Click the parking pad** to show resize handles; drag a side to grow/shrink it
   (roads under the new pad are trimmed automatically).
 
@@ -173,15 +178,31 @@ player-drawn network with a **cached distance field**:
 - Trucks greedily descend the field, re-evaluated every tick — always the
   shortest legal route, with no back-and-forth jitter.
 - A blocked step makes a truck wait, then take a free **detour**; true head-on
-  **deadlocks** on a single lane are broken by a committed *yield* (the
-  lower-priority truck tucks into a pocket until the other passes).
+  **deadlocks** on a single lane are broken by a committed *yield* — the
+  lower-priority truck pulls aside onto **open ground** (never onto a crossing
+  lane) and resumes when the other has passed, left the area, or on a timeout,
+  so a yield can never hold forever.
 - **Docking.** A truck prefers to load from a road cell touching the shovel; if
   none is reachable it leaves the road, nuzzles into the adjacent sub-cell, loads,
-  then rejoins the network.
-- **Dodging.** If a shovel boxes a truck in on the road with no road detour, the
-  truck skirts it off-road via a bounded BFS and rejoins past it.
+  then rejoins the network. A docking truck that can't reach the shovel releases
+  its claim instead of starving the queue.
+- **Dodging & recovery.** If a shovel boxes a truck in on the road with no road
+  detour, the truck skirts it off-road via a bounded BFS and rejoins past it.
+  Wherever a manoeuvre leaves a truck off-road, a wide nearest-road search +
+  obstacle-avoiding BFS always walks it back onto the network — a truck can
+  never be stranded.
 - **Shovel relocation.** A spent shovel auto-moves to the nearest explored ore
-  block whose body clears surrounding roads.
+  block — never settling on (or straddling) a road, always leaving a dock cell
+  for trucks, and never onto a block another shovel works. An idle shovel
+  sitting on tarmac pulls itself aside.
+- **Parking.** Trucks park nose-up *en bataille* on a slot grid whose footprint
+  (body + rear gap) stays fully inside the pad — a parked truck can never block
+  a road along the pad's edge. Slots are assigned nearest-free and re-validated
+  against real occupancy; with the pad full, trucks wait on open ground beside
+  it and take the first freed slot or job.
+- **Graders.** Each idle grader is dispatched to the worn road cell shortest to
+  reach (one-way aware). Two graders never target the same cell: they fan out
+  to distinct areas, and spare graders rest at the parking pad.
 
 **Collision.** Vehicles reserve grid cells via their rotated footprint; trucks
 reserve a tight footprint plus the cell **behind** them so a follower keeps a
@@ -296,7 +317,7 @@ the road array bounds-capped.
 | `drill` | `x, y` | Drill a block (block coords); charges the drill cost. |
 | `roads` | `cells: [{ gx, gy, dir }]` | Replace the drawn network (sub-zone cells, optional one-way `dir`). |
 | `control` | `label`, `dir` \| `release` | Manually drive a vehicle, or hand it back to the autopilot. |
-| `moveTo` | `label`, `gx`, `gy` | Route a vehicle to a sub-zone cell via the shortest path (roads + off-road). |
+| `moveTo` | `label`, `gx`, `gy` | Drive a vehicle straight to a sub-zone cell (direct line across terrain, around crushers/stationary machines, through traffic). |
 | `assign` | `truck`, `shovel` | Assign a haul truck to a shovel (or `null`). |
 | `select` | `label`, `on` | Mark a shovel selected (pauses its auto-relocation). |
 | `debug` | `label`, `on` | Toggle the vehicle's debug-path overlay. |
@@ -395,7 +416,7 @@ npm run test:load -- ...  # WebSocket load generator → test/load/
 
 | Path | What it covers |
 | --- | --- |
-| `test/unit/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock, docking, dodge), parking layout & resize, shovel spacing & relocation, rich-vein dozer prep, a full **haul-cycle integration** run. |
+| `test/unit/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock/yield timeouts, docking, dodge, off-road recovery), parking (slot grid, occupancy-aware assignment, overflow waiting, resize), grader dispatch/dispersion, shovel spacing & road-clear relocation, rich-vein dozer prep, direct move-to & manual pass-through, a full **haul-cycle integration** run. |
 | `test/unit/game/mine.test.js` | Mine generation, ore deposits, rich veins (deterministic via seed). |
 | `test/unit/game/admin.test.js` | Auth, session snapshots, **password persistence** across restarts. |
 | `test/unit/server/*.test.js` | Validators, security/rate-limit, admin HTTP (**supertest**), **ws integration**, SQLite persistence. |
