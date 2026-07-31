@@ -3,7 +3,7 @@
 // receives and forwards manual-driving commands. Positions are smoothed between
 // server updates by lerping toward the latest target.
 
-import { applyCamera, visibleRect, DPR } from './camera.js';
+import { applyCamera, visibleRect, DPR, camera } from './camera.js';
 import { COLORS_SOLID } from './mine.js';
 import { drawPickup, drawDozer, drawGrader, drawExcavator, drawOHT } from './vehicle-sprites.js';
 
@@ -78,7 +78,7 @@ export class Vehicle {
     this.y += (this.ty - this.y) * k;
   }
 
-  draw(ctx, selected) {
+  draw(ctx, selected, labelBoxes) {
     ctx.save();
     ctx.translate(this.x, this.y);
 
@@ -136,12 +136,34 @@ export class Vehicle {
 
     if (this.broken) this._drawBreakdown(ctx);
 
-    // label — kept upright above the vehicle
-    ctx.fillStyle = selected ? '#ffd83b' : 'rgba(255, 255, 255, 0.9)';
-    ctx.font = 'bold 10px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(this.label, 0, -this.selR - (this.task ? 15 : 5));
+    // label — kept upright above the vehicle, drawn at a CONSTANT on-screen size
+    // (counter the camera zoom) with an outline for legibility. A per-frame screen-space
+    // overlap test (labelBoxes) suppresses any name that would collide with one already
+    // drawn — so a cluster of trucks parked tightly in the pad shows a few clean labels
+    // instead of a smear. The selected vehicle always wins and never hides another's box.
+    const sc = camera.scale || 1;
+    const sx = this.x * sc + camera.ox;                       // vehicle centre, screen px
+    const sy = this.y * sc + camera.oy;
+    const yb = sy - (this.selR + (this.task ? 15 : 5)) * sc;  // label baseline, screen px
+    const hw = this.label.length * 3.5 + 2;                   // ~half text width at 11px bold
+    const box = { x0: sx - hw, y0: yb - 12, x1: sx + hw, y1: yb + 2 };
+    const hidden = labelBoxes && !selected && labelBoxes.some(
+      (b) => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0);
+    if (!hidden) {
+      if (labelBoxes) labelBoxes.push(box);
+      ctx.save();
+      ctx.scale(1 / sc, 1 / sc);                              // switch to screen pixels
+      const y = -(this.selR + (this.task ? 15 : 5)) * sc;
+      ctx.font = 'bold 11px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.strokeText(this.label, 0, y);
+      ctx.fillStyle = selected ? '#ffd83b' : 'rgba(255, 255, 255, 0.92)';
+      ctx.fillText(this.label, 0, y);
+      ctx.restore();
+    }
 
     ctx.restore();
   }
@@ -364,11 +386,12 @@ export class Fleet {
     const cssW = this.cssW ?? this.canvas.width / this.dpr;
     const cssH = this.cssH ?? this.canvas.height / this.dpr;
     const vr = visibleRect(cssW, cssH);
+    const labelBoxes = [];   // per-frame screen-space name rects, for overlap culling
     for (const v of this.vehicles) {
       v.lerp(k);
       const m = Math.max(v.len, v.wid);
       if (v.x < vr.x0 - m || v.x > vr.x1 + m || v.y < vr.y0 - m || v.y > vr.y1 + m) continue;
-      v.draw(ctx, v === this.selected);
+      v.draw(ctx, v === this.selected, labelBoxes);
     }
 
     this._drawPayouts(ctx, dt);

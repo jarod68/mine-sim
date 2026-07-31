@@ -230,12 +230,17 @@ function build(state) {
 
   fleet = new Fleet(document.getElementById('vehicle-layer'), { w: viewW, h: viewH }, grid);
   fleet.onControl = (label, cmd) => net.control(label, cmd);
-  fleet.onSelect = (v) => { syncSelection(v); renderAsset(v); };
+  // Selecting an asset opens its details panel; deselecting leaves the panel's
+  // visibility to the close button (so it doesn't flicker shut on every empty click).
+  fleet.onSelect = (v) => { syncSelection(v); renderAsset(v); if (v) openAssetPanel(); };
   fleet.sync(state.vehicles);
   fleet.snapToTargets();
 
   setupModes();
   renderAsset(null);
+  // Default state: open on desktop (shows "no asset"), closed on a phone.
+  assetPanel.hidden = isMobile();
+  positionAssetPanel();
 
   canvas.addEventListener('click', (e) => {
     if (suppressTap) { suppressTap = false; return; }   // a touch pan/pinch, not a real tap
@@ -544,8 +549,29 @@ function setupCamera() {
   stage.addEventListener('pointercancel', () => cancelPan());
   window.addEventListener('blur', () => cancelPan());
   stage.addEventListener('contextmenu', (e) => e.preventDefault());
-  window.addEventListener('resize', () => { resizeAll(); fit(); });
-  window.addEventListener('orientationchange', () => setTimeout(() => { resizeAll(); fit(); }, 200));
+
+  // On resize, keep the CURRENT view steady instead of snapping back to a full-map
+  // fit: hold the world point that sits at the stage centre fixed, and keep the zoom
+  // (only nudged up if the window grew past the min-scale floor). Without this the
+  // whole scene jumped to the empty full map on every resize.
+  let lastW = stage.clientWidth, lastH = stage.clientHeight;
+  const preserveView = () => {
+    const wx = (lastW / 2 - camera.ox) / camera.scale;   // world point at the old centre
+    const wy = (lastH / 2 - camera.oy) / camera.scale;
+    resizeAll();
+    const nw = stage.clientWidth, nh = stage.clientHeight;
+    camera.scale = Math.max(minScale(), camera.scale);
+    camera.ox = nw / 2 - wx * camera.scale;
+    camera.oy = nh / 2 - wy * camera.scale;
+    lastW = nw; lastH = nh;
+    popup.hide();   // its anchor block is no longer under the old screen point
+    rerender();
+    updateParkOverlay();
+    positionAssetPanel();                                   // keep the fleet-offset correct
+    if (!fleet?.selected) assetPanel.hidden = isMobile();   // follow the open/closed default when idle
+  };
+  window.addEventListener('resize', preserveView);
+  window.addEventListener('orientationchange', () => setTimeout(preserveView, 200));
 
   // ── Touch gestures ──
   // One finger pans (only in Mouse mode — in Road/Eraser mode it draws, handled by
@@ -633,9 +659,8 @@ function assetStatusText(v) {
 
 function renderAsset(v) {
   markAssetListSelection();   // keep the fleet panel's highlight in sync with the selection
-  assetEl.classList.toggle('has-asset', !!v);   // mobile: the details dock shows only when an asset is selected
   if (!v) {
-    assetEl.innerHTML = '<span class="atitle">Asset</span><span class="muted">No asset selected</span>';
+    assetEl.innerHTML = '<span class="muted">No asset selected</span>';
     return;
   }
 
@@ -666,7 +691,7 @@ function renderAsset(v) {
   parts.push(`<span class="ai"><i>Debug</i><input type="checkbox" id="asset-debug"${debugOn.has(v.label) ? ' checked' : ''}></span>`);
   parts.push('<button id="asset-moveto" class="asset-btn" title="Then click a destination on the map (shortcut: W)">🎯 Move to…</button>');
 
-  assetEl.innerHTML = `<span class="atitle">Asset</span>${parts.join('')}`;
+  assetEl.innerHTML = parts.join('');
 
   const sel = assetEl.querySelector('#asset-shovel');
   if (sel) {
@@ -772,6 +797,30 @@ function hideBreakdown() { if (breakdownEl) breakdownEl.hidden = true; }
 // ── Left fleet panel: a comparable list of every asset, with a locate button ──
 const assetListEl = document.getElementById('asset-list');
 const assetListBody = document.getElementById('al-body');
+const assetPanel = document.getElementById('asset-panel');
+
+// ── Asset details panel (left dock) ──
+const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+// Slide the panel to the right of the fleet list when both are open (desktop only;
+// on a phone both panels are full-screen and the offset is neutralised in CSS).
+function positionAssetPanel() {
+  if (assetPanel) assetPanel.classList.toggle('with-fleet', !isMobile() && !assetListEl.hidden);
+}
+function openAssetPanel() {
+  if (!assetPanel) return;
+  assetPanel.hidden = false;
+  positionAssetPanel();
+}
+function closeAssetPanel() {
+  if (assetPanel) assetPanel.hidden = true;
+}
+document.getElementById('asset-panel-close').addEventListener('click', () => {
+  closeAssetPanel();
+  fleet?.setSelected(null);   // clear the map highlight; re-clicking the asset reopens the panel
+});
+// Keep map pan/zoom from firing while interacting with the panel.
+assetPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
+assetPanel.addEventListener('wheel', (e) => e.stopPropagation());
 // Generated FRONT-ON illustrations of each vehicle (not the top-down sprite),
 // reusing the sprite palette so the fleet list reads at a glance: construction
 // yellow for the light vehicle / grader, white machines for the shovel / dozer /
@@ -898,6 +947,7 @@ function toggleAssetList(force) {
   const show = force ?? assetListEl.hidden;
   assetListEl.hidden = !show;
   if (show) renderAssetList();
+  positionAssetPanel();   // shift the details panel aside so both stay visible
 }
 
 document.getElementById('assets-btn').addEventListener('click', () => toggleAssetList());

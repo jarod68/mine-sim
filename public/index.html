@@ -8,14 +8,15 @@
 </head>
 <body>
   <header class="topbar">
-    <div id="asset-details" class="asset"></div>
-    <span id="room-badge" class="room-badge" hidden></span>
-    <div class="credit" id="credit">$0</div>
-    <div class="topbar-actions">
-      <button id="about-btn" class="shop-btn about-btn" title="How to play">❓<span class="lbl"> How to play</span></button>
-      <button id="stats-btn" class="shop-btn" title="Mine statistics">📊<span class="lbl"> Stats</span></button>
-      <button id="assets-btn" class="shop-btn assets-btn" title="Fleet / assets list">📋<span class="lbl"> Assets</span></button>
-      <button id="shop-btn" class="shop-btn" title="Buy assets">🛒<span class="lbl"> Buy assets</span></button>
+    <div class="topbar-main">
+      <span id="room-badge" class="room-badge" hidden></span>
+      <div class="credit" id="credit">$0</div>
+      <div class="topbar-actions">
+        <button id="about-btn" class="shop-btn about-btn" title="How to play">❓<span class="lbl"> How to play</span></button>
+        <button id="stats-btn" class="shop-btn" title="Mine statistics">📊<span class="lbl"> Stats</span></button>
+        <button id="assets-btn" class="shop-btn assets-btn" title="Fleet / assets list">📋<span class="lbl"> Assets</span></button>
+        <button id="shop-btn" class="shop-btn" title="Buy assets">🛒<span class="lbl"> Buy assets</span></button>
+      </div>
     </div>
     <div class="tools">
       <ul class="legend">
@@ -39,6 +40,13 @@
     <canvas id="roads-layer"></canvas>
     <canvas id="vehicle-layer"></canvas>
     <div id="popup" class="popup"></div>
+    <aside id="asset-panel" class="asset-panel" hidden>
+      <header class="al-head">
+        <span class="al-title">Asset</span>
+        <button class="al-close" id="asset-panel-close" aria-label="Close">×</button>
+      </header>
+      <div class="al-body" id="asset-details"></div>
+    </aside>
     <aside id="asset-list" class="asset-list" hidden>
       <header class="al-head">
         <span class="al-title">Fleet</span>
