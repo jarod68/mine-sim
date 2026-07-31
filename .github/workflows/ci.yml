@@ -89,3 +89,34 @@ jobs:
           tags: jarod68/mine-sim:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Software supply-chain: generate a CycloneDX SBOM from the freshly-pushed
+  # image with Syft, scan it with Grype (report-only gate), and upload the SBOM
+  # to Dependency-Track (https://dtrack.holtz.fr) for continuous SCA. Needs repo
+  # secrets DTRACK_URL and DTRACK_API_KEY (an automation-team key with
+  # BOM_UPLOAD + PROJECT_CREATION_UPLOAD).
+  sbom:
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Install Syft & Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh  | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+      - name: Generate CycloneDX SBOM (Syft)
+        run: syft "jarod68/mine-sim:latest" -o cyclonedx-json=sbom.cdx.json
+      - name: Scan the SBOM (Grype)
+        # Report-only for now — drop `|| true` to fail the build on a critical CVE.
+        run: grype "sbom:sbom.cdx.json" --fail-on critical || true
+      - name: Upload SBOM to Dependency-Track
+        env:
+          DTRACK_URL: ${{ secrets.DTRACK_URL }}
+          DTRACK_API_KEY: ${{ secrets.DTRACK_API_KEY }}
+        run: |
+          curl -sSf -X POST "$DTRACK_URL/api/v1/bom" \
+            -H "X-Api-Key: $DTRACK_API_KEY" \
+            -F "autoCreate=true" \
+            -F "projectName=mine-sim" \
+            -F "projectVersion=latest" \
+            -F "bom=@sbom.cdx.json"
