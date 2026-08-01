@@ -105,7 +105,9 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh  | sh -s -- -b /usr/local/bin
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
       - name: Generate CycloneDX SBOM (Syft)
-        run: syft "jarod68/mine-sim:latest" -o cyclonedx-json=sbom.cdx.json
+        # Pin the CycloneDX spec to 1.6 — recent Syft defaults to 1.7, which
+        # Dependency-Track 4.12 rejects with HTTP 400 (it supports up to 1.6).
+        run: syft "jarod68/mine-sim:latest" -o cyclonedx-json@1.6=sbom.cdx.json
       - name: Scan the SBOM (Grype)
         # Report-only for now — drop `|| true` to fail the build on a critical CVE.
         run: grype "sbom:sbom.cdx.json" --fail-on critical || true
