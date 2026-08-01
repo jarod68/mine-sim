@@ -113,8 +113,16 @@ jobs:
         env:
           DTRACK_URL: ${{ secrets.DTRACK_URL }}
           DTRACK_API_KEY: ${{ secrets.DTRACK_API_KEY }}
+          # "user:password" for the Traefik basic-auth guarding dtrack.holtz.fr.
+          DTRACK_BASIC_AUTH: ${{ secrets.DTRACK_BASIC_AUTH }}
         run: |
+          # If the dtrack host's /api is behind Traefik basic-auth, send those
+          # creds too (set DTRACK_BASIC_AUTH); Dependency-Track authenticates the
+          # upload itself via X-Api-Key. When /api is open, leave the secret unset.
+          auth=()
+          [ -n "$DTRACK_BASIC_AUTH" ] && auth=(-u "$DTRACK_BASIC_AUTH")
           curl -sSf -X POST "$DTRACK_URL/api/v1/bom" \
+            "${auth[@]}" \
             -H "X-Api-Key: $DTRACK_API_KEY" \
             -F "autoCreate=true" \
             -F "projectName=mine-sim" \
