@@ -123,10 +123,13 @@ jobs:
           # upload itself via X-Api-Key. When /api is open, leave the secret unset.
           auth=()
           [ -n "$DTRACK_BASIC_AUTH" ] && auth=(-u "$DTRACK_BASIC_AUTH")
-          curl -sSf -X POST "$DTRACK_URL/api/v1/bom" \
+          # Capture DT's response body — it explains a 400 (bad BOM / spec version).
+          code=$(curl -sS -o resp.txt -w '%{http_code}' -X POST "$DTRACK_URL/api/v1/bom" \
             "${auth[@]}" \
             -H "X-Api-Key: $DTRACK_API_KEY" \
             -F "autoCreate=true" \
             -F "projectName=mine-sim" \
             -F "projectVersion=latest" \
-            -F "bom=@sbom.cdx.json"
+            -F "bom=@sbom.cdx.json")
+          echo "HTTP $code"; cat resp.txt; echo
+          [ "$code" -lt 300 ] || exit 1
