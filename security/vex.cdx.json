@@ -1,0 +1,500 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-08-03T04:48:23Z",
+    "component": {
+      "type": "container",
+      "bom-ref": "ed8ac091-48b3-401b-b334-5466c8c8cc56",
+      "name": "mine-sim",
+      "version": "latest"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "cb7f9151-d268-47e6-a880-f944f93372ad",
+      "name": "body-parser",
+      "version": "1.20.5",
+      "purl": "pkg:npm/body-parser@1.20.5"
+    },
+    {
+      "type": "library",
+      "bom-ref": "e4223e53-e89e-4e2c-a45a-bb15c983dc84",
+      "name": "coreutils",
+      "version": "9.1-1",
+      "purl": "pkg:deb/debian/coreutils@9.1-1?arch=amd64&distro=debian-12.15"
+    },
+    {
+      "type": "library",
+      "bom-ref": "55d59029-04f4-45b0-a5fc-b3219b4a9c1a",
+      "name": "dpkg",
+      "version": "1.21.23",
+      "purl": "pkg:deb/debian/dpkg@1.21.23?arch=amd64&distro=debian-12.15"
+    },
+    {
+      "type": "library",
+      "bom-ref": "74cf79f4-0ad7-42e0-b0a9-761d7c95f588",
+      "name": "libcap2",
+      "version": "1:2.66-4+deb12u3+b1",
+      "purl": "pkg:deb/debian/libcap2@1%3A2.66-4%2Bdeb12u3%2Bb1?arch=amd64&distro=debian-12.15&upstream=libcap2%401%3A2.66-4%2Bdeb12u3"
+    },
+    {
+      "type": "library",
+      "bom-ref": "b703bb08-02bb-461c-9892-8fee19f21a96",
+      "name": "libgcrypt20",
+      "version": "1.10.1-3+deb12u1",
+      "purl": "pkg:deb/debian/libgcrypt20@1.10.1-3%2Bdeb12u1?arch=amd64&distro=debian-12.15"
+    },
+    {
+      "type": "library",
+      "bom-ref": "1f661cac-2748-4779-8de7-33d5672e9116",
+      "name": "libtasn1-6",
+      "version": "4.19.0-2+deb12u1",
+      "purl": "pkg:deb/debian/libtasn1-6@4.19.0-2%2Bdeb12u1?arch=amd64&distro=debian-12.15"
+    },
+    {
+      "type": "library",
+      "bom-ref": "662b0c61-48ab-4596-9026-6b9c497eaad9",
+      "name": "sed",
+      "version": "4.9-1+deb12u1",
+      "purl": "pkg:deb/debian/sed@4.9-1%2Bdeb12u1?arch=amd64&distro=debian-12.15"
+    },
+    {
+      "type": "library",
+      "bom-ref": "494620c8-0b14-462d-9cbb-733d10fab914",
+      "name": "tar",
+      "version": "1.34+dfsg-1.2+deb12u1",
+      "purl": "pkg:deb/debian/tar@1.34%2Bdfsg-1.2%2Bdeb12u1?arch=amd64&distro=debian-12.15"
+    },
+    {
+      "type": "library",
+      "bom-ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7",
+      "name": "util-linux",
+      "version": "2.38.1-5+deb12u3",
+      "purl": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15"
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "GHSA-v422-hmwv-36x6",
+      "source": {
+        "name": "GITHUB",
+        "url": "https://github.com/advisories"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "body-parser is configured only with static, valid limit literals ('1kb', '4kb') on authenticated /admin routes. bytes.parse() therefore never returns null/NaN, so the vulnerable branch that silently skips the body-size check is never reached."
+      },
+      "affects": [
+        {
+          "ref": "cb7f9151-d268-47e6-a880-f944f93372ad"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2016-2781",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "'chroot --userspec' is never executed. Exploitation requires a local interactive user, which does not exist in this single-process, non-root (uid 1000) container."
+      },
+      "affects": [
+        {
+          "ref": "e4223e53-e89e-4e2c-a45a-bb15c983dc84"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2024-0684",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "The coreutils 'split' utility is never invoked by 'node server.js'; line_bytes_split() is unreachable at runtime."
+      },
+      "affects": [
+        {
+          "ref": "e4223e53-e89e-4e2c-a45a-bb15c983dc84"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2022-48303",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "tar is never executed at runtime (the app processes no archive; its only .exec is better-sqlite3 SQL, not a shell)."
+      },
+      "affects": [
+        {
+          "ref": "494620c8-0b14-462d-9cbb-733d10fab914"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2023-39804",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "tar is never executed at runtime; no PAX archive is processed."
+      },
+      "affects": [
+        {
+          "ref": "494620c8-0b14-462d-9cbb-733d10fab914"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-41989",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "Node.js uses OpenSSL, not libgcrypt. gcry_pk_decrypt / ECDH via libgcrypt is never loaded or called by the application."
+      },
+      "affects": [
+        {
+          "ref": "b703bb08-02bb-461c-9892-8fee19f21a96"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-41990",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "Node.js uses OpenSSL, not libgcrypt; the Dilithium signing path in libgcrypt is never exercised."
+      },
+      "affects": [
+        {
+          "ref": "b703bb08-02bb-461c-9892-8fee19f21a96"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2024-12133",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "libtasn1 is a GnuTLS dependency; Node.js uses OpenSSL. No certificate parsing goes through libtasn1, so the path is unreachable."
+      },
+      "affects": [
+        {
+          "ref": "1f661cac-2748-4779-8de7-33d5672e9116"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2025-13151",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "Same as CVE-2024-12133: libtasn1/GnuTLS is not used by Node.js/OpenSSL; asn1_expend_octet_string is never reached."
+      },
+      "affects": [
+        {
+          "ref": "1f661cac-2748-4779-8de7-33d5672e9116"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2025-6297",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "dpkg-deb runs only at image build time, never at runtime; no adversarial .deb is processed by the running service."
+      },
+      "affects": [
+        {
+          "ref": "55d59029-04f4-45b0-a5fc-b3219b4a9c1a"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-2219",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "dpkg-deb is not invoked at runtime; no crafted zstd .deb is decompressed."
+      },
+      "affects": [
+        {
+          "ref": "55d59029-04f4-45b0-a5fc-b3219b4a9c1a"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2025-1390",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "pam_cap.so and /etc/security/capability.conf are not used; there is no PAM stack in this container."
+      },
+      "affects": [
+        {
+          "ref": "74cf79f4-0ad7-42e0-b0a9-761d7c95f588"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-4878",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "The cap_set_file() TOCTOU requires a local unprivileged attacker with write access to a parent directory. The container runs a single non-root process with no local users."
+      },
+      "affects": [
+        {
+          "ref": "74cf79f4-0ad7-42e0-b0a9-761d7c95f588"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2024-28085",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "'wall' (setgid tty) is never used and there are no other terminal users to target."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2025-14104",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "The SUID login-utils path (setpwnam) is not used; no password-database writes occur."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-13595",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "libblkid is triggered by udev/udisks on block-device hotplug, which does not occur inside the container."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-27456",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "'mount' SUID exploitation needs an /etc/fstab 'user,loop' entry and a local attacker; neither exists."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-3184",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "'login -h' is never executed by the application."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-5958",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "'sed -i --follow-symlinks' is never executed by the application."
+      },
+      "affects": [
+        {
+          "ref": "662b0c61-48ab-4596-9026-6b9c497eaad9"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-53612",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "util-linux utilities are never invoked by the running service (single non-root process, no local users/hotplug). No published description yet - revisit when details are available."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-53613",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "util-linux utilities are never invoked by the running service (single non-root process, no local users/hotplug). No published description yet - revisit when details are available."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    },
+    {
+      "id": "DEBIAN-CVE-2026-53614",
+      "source": {
+        "name": "OSV"
+      },
+      "analysis": {
+        "state": "not_affected",
+        "justification": "requires_environment",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "util-linux utilities are never invoked by the running service (single non-root process, no local users/hotplug). No published description yet - revisit when details are available."
+      },
+      "affects": [
+        {
+          "ref": "c252acba-ab6c-4763-8563-1d2695e0e2f7"
+        }
+      ]
+    }
+  ]
+}
