@@ -1,5 +1,5 @@
-// Capture the README screenshots from the real app. Boots an in-process server
-// on an ephemeral port, drives it with Playwright, and writes PNGs to
+// Capture the README screenshots from the real app. Serves the static build with
+// serve.js on a local port, drives it with Playwright, and writes PNGs to
 // docs/screenshots/.
 //
 // Requires Playwright + chromium:  npx playwright install chromium
@@ -7,17 +7,36 @@
 
 const path = require('path');
 const fs = require('fs');
+const http = require('node:http');
+const { spawn } = require('node:child_process');
 const { chromium } = require('playwright');
-const { createServer } = require('../server/app');
 
 const OUT = path.join(__dirname, '..', 'docs', 'screenshots');
-const ADMIN_PASS = 'demo-pass';
+const PORT = process.env.PORT || 3219;
+const base = `http://localhost:${PORT}`;
+
+// Boot serve.js and wait until it answers.
+function startServer() {
+  const proc = spawn(process.execPath, [path.join(__dirname, '..', 'serve.js')], {
+    env: { ...process.env, PORT: String(PORT) }, stdio: 'inherit',
+  });
+  const ready = new Promise((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    (function poll() {
+      http.get(base, (res) => { res.resume(); resolve(); })
+        .on('error', () => {
+          if (Date.now() > deadline) return reject(new Error('serve.js did not start'));
+          setTimeout(poll, 150);
+        });
+    })();
+  });
+  return { proc, ready };
+}
 
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
-  const inst = createServer({ adminPass: ADMIN_PASS });
-  await new Promise((r) => inst.server.listen(0, r));
-  const base = `http://localhost:${inst.server.address().port}`;
+  const server = startServer();
+  await server.ready;
 
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 760 }, deviceScaleFactor: 2 });
@@ -25,7 +44,6 @@ async function main() {
   const shot = (name) => page.screenshot({ path: path.join(OUT, name) });
 
   await page.goto(base);
-  await page.click('#lobby-create');
   await page.waitForSelector('#lobby', { state: 'hidden' }).catch(() => {});
   await page.waitForTimeout(2000);                       // let the fleet render
 
@@ -74,18 +92,8 @@ async function main() {
   await shot('road-mode.png');
   await page.click('#mode-mouse');
 
-  // Admin dashboard (separate context carrying Basic auth).
-  const adminCtx = await browser.newContext({
-    viewport: { width: 1280, height: 760 }, deviceScaleFactor: 2,
-    httpCredentials: { username: 'admin', password: ADMIN_PASS },
-  });
-  const adminPage = await adminCtx.newPage();
-  await adminPage.goto(base + '/admin');
-  await adminPage.waitForTimeout(800);
-  await adminPage.screenshot({ path: path.join(OUT, 'admin.png'), fullPage: true });
-
   await browser.close();
-  await new Promise((r) => inst.stop(r));
+  server.proc.kill();
   console.log('screenshots written to', OUT);
 }
 
