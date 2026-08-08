@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   World, Vehicle, Roads, Autopilot,
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
-} from '../../../game/world.js';
-import { sizedParkingRect } from '../../../game/world-setup.js';
-import { padSlots } from '../../../game/constants.js';
+} from '../../../public/game/world.js';
+import { sizedParkingRect } from '../../../public/game/world-setup.js';
+import { padSlots } from '../../../public/game/constants.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

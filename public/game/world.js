@@ -5,22 +5,22 @@
 // modules (vehicle / roads / autopilot / min-heap / constants); this file is the
 // orchestrator: world setup, the tick loop, commands, economy, snapshots.
 
-const { generateMine, rebuildVeins, BLOCK_TONNAGE } = require('./mine');
-const { Vehicle } = require('./vehicle');
-const { Roads } = require('./roads');
-const { Autopilot } = require('./autopilot');
-const { MinHeap } = require('./min-heap');
-const {
+import { generateMine, rebuildVeins, BLOCK_TONNAGE } from './mine.js';
+import { Vehicle } from './vehicle.js';
+import { Roads } from './roads.js';
+import { Autopilot } from './autopilot.js';
+import { MinHeap } from './min-heap.js';
+import {
   placeCrushers, sizedParkingRect, placeTrucksInParking, buildExampleCircuit,
-} = require('./world-setup');
-const {
+} from './world-setup.js';
+import {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
   STARTING_CREDIT, DRILL_COST, ROAD_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
   BREAKDOWN_CHANCE, REPAIR_TIME,
   ORE_VALUE, PARKING, PARK_HEADING,
   EXCAVATORS, SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
   DIRS, key, padSlots, rectsOverlap,
-} = require('./constants');
+} from './constants.js';
 
 class World {
   // `seed` (optional) makes map generation deterministic — used by tests.
@@ -958,17 +958,20 @@ class World {
       recs.push(v);
     }
     if (!recs.length) return null;
-    const buf = Buffer.allocUnsafe(3 + recs.length * 18);
-    buf.writeUInt8(1, 0);
-    buf.writeUInt16LE(recs.length, 1);
+    // Universal ArrayBuffer + DataView (works in Node and the browser worker,
+    // and is transferable via postMessage) — little-endian to match the client.
+    const buf = new ArrayBuffer(3 + recs.length * 18);
+    const dv = new DataView(buf);
+    dv.setUint8(0, 1);
+    dv.setUint16(1, recs.length, true);
     let o = 3;
     for (const v of recs) {
-      buf.writeUInt16LE(v.id, o); o += 2;
-      buf.writeFloatLE(v.x, o); o += 4;
-      buf.writeFloatLE(v.y, o); o += 4;
-      buf.writeFloatLE(v.heading, o); o += 4;
-      buf.writeUInt16LE(v.gx, o); o += 2;
-      buf.writeUInt16LE(v.gy, o); o += 2;
+      dv.setUint16(o, v.id, true); o += 2;
+      dv.setFloat32(o, v.x, true); o += 4;
+      dv.setFloat32(o, v.y, true); o += 4;
+      dv.setFloat32(o, v.heading, true); o += 4;
+      dv.setUint16(o, v.gx, true); o += 2;
+      dv.setUint16(o, v.gy, true); o += 2;
     }
     return buf;
   }
@@ -1061,7 +1064,7 @@ function fieldEq(a, b) {
 }
 
 
-module.exports = {
+export {
   World, Vehicle, Roads, Autopilot,
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_COST,
   ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,

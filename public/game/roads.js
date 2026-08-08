@@ -1,7 +1,7 @@
 // The authoritative road network (drawn one-way cells + parking pads + crusher
 // footprints). The client has its own editor/renderer copy in public/components.
 
-const { key, ROAD_WEAR_LIMIT } = require('./constants');
+import { key, ROAD_WEAR_LIMIT } from './constants.js';
 
 class Roads {
   constructor(grid) {
@@ -90,4 +90,4 @@ class Roads {
   }
 }
 
-module.exports = { Roads };
+export { Roads };

@@ -14,7 +14,7 @@ export default defineConfig({
       // exercise — incl. the autopilot/vehicle/roads split out of world.js.
       provider: 'v8',
       reporter: ['text', 'html'],
-      include: ['game/**/*.js', 'public/components/**/*.js'],
+      include: ['public/game/**/*.js', 'public/components/**/*.js'],
       // Pure rendering paths (canvas drawing) are exercised but not asserted on;
       // we still report them so coverage reflects the whole project. Thresholds
       // sit just below the current numbers so they catch a regression without
@@ -27,7 +27,7 @@ export default defineConfig({
         functions: 70,
         lines: 68,
         // The authoritative game logic is held to a high bar.
-        'game/**': {
+        'public/game/**': {
           statements: 76,
           branches: 57,
           functions: 82,

@@ -223,7 +223,7 @@ function generateMine(cols, rows, seed) {
   }
 }
 
-module.exports = {
+export {
   generateMine,
   rebuildVeins,
   setOre,

@@ -2,7 +2,7 @@
 // / dump / park), shortest-path distance fields, anti-jam (detour / off-road dodge /
 // head-on yield). Drives instances handed in via the constructor + hooks.
 
-const { DIRS, BUCKET_TIME, TRUCK_CAP, DUMP_TIME, PARK_RECHECK, STUCK_DETOUR, STUCK_DODGE, DIST_CACHE_MAX, PARK_HEADING, key, padSlots } = require('./constants');
+import { DIRS, BUCKET_TIME, TRUCK_CAP, DUMP_TIME, PARK_RECHECK, STUCK_DETOUR, STUCK_DODGE, DIST_CACHE_MAX, PARK_HEADING, key, padSlots } from './constants.js';
 
 class Autopilot {
   constructor(grid, roads, hooks) {
@@ -1597,4 +1597,4 @@ class Autopilot {
   }
 }
 
-module.exports = { Autopilot };
+export { Autopilot };

@@ -6,8 +6,8 @@
 // Dependencies (grid / roads / mine) are passed in explicitly rather than read
 // off `this`, which makes each routine independently testable.
 
-const { setOre } = require('./mine');
-const { COLS, ROWS, PARKING, PARK_HEADING, PARK_BLOCKS, padSlots } = require('./constants');
+import { setOre } from './mine.js';
+import { COLS, ROWS, PARKING, PARK_HEADING, PARK_BLOCKS, padSlots } from './constants.js';
 
 // Chebyshev block distance from (bx,by) to the parking footprint (0 inside it).
 function blockDistToParking(bx, by) {
@@ -137,6 +137,6 @@ function buildExampleCircuit(grid, mine, park) {
   return { cells, crusher };
 }
 
-module.exports = {
+export {
   blockDistToParking, placeCrushers, sizedParkingRect, placeTrucksInParking, buildExampleCircuit,
 };

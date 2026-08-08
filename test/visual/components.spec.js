@@ -19,7 +19,7 @@ for (const name of fixtures) {
 // render a seeded mine overview. (Roads / crushers / fleet use unseeded
 // Math.random, so they're left out to keep the baseline stable.)
 test('renders the seeded default map', async ({ page }) => {
-  const { generateMine } = await import('../../game/mine.js');
+  const { generateMine } = await import('../../public/game/mine.js');
   const mine = generateMine(190, 139, 12345);
   const blocks = [];
   for (const row of mine.blocks)

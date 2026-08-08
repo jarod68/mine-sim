@@ -1,26 +1,19 @@
 {
   "name": "mine-sim",
   "version": "0.1.0",
-  "description": "Open-pit mine simulation — 2D grid of mining blocks",
-  "main": "server.js",
+  "description": "Open-pit mine simulation — full-local build (runs entirely in the browser, no server)",
+  "main": "serve.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node serve.js",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
-    "test:robot": "robot --outputdir test/robot/results test/robot",
-    "test:load": "node test/load/loadtest.js",
     "coverage": "vitest run --coverage",
     "prebuild": "npm run coverage",
     "build": "docker buildx create --name minesim-builder --driver docker-container --bootstrap --use 2>/dev/null || true && docker buildx build --builder minesim-builder --platform linux/amd64,linux/arm64 -t jarod68/mine-sim:latest --push .",
     "docker:build": "npm run build"
-  },
-  "dependencies": {
-    "better-sqlite3": "^12.11.1",
-    "express": "^4.19.2",
-    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
@@ -28,7 +21,6 @@
     "eslint": "^9.39.4",
     "globals": "^17.6.0",
     "happy-dom": "^20.10.6",
-    "supertest": "^7.2.2",
     "vitest": "^4.1.9"
   }
 }

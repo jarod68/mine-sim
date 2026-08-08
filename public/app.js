@@ -7,7 +7,7 @@ import { Fleet } from './components/vehicle.js';
 import { Roads } from './components/roads.js';
 import { camera, toWorld } from './components/camera.js';
 import { COLORS_SOLID } from './components/mine.js';
-import { Net } from './components/net.js';
+import { LocalEngine } from './engine/local-engine.js';
 
 const canvas = document.getElementById('mine');
 const creditEl = document.getElementById('credit');
@@ -17,7 +17,7 @@ const shopEl = document.getElementById('shop');
 let setMode = () => {};   // assigned by setupModes(); lets other code switch tool mode
 let flyTo = () => {};     // assigned by setupCamera(); smoothly centres the camera on a world point
 
-const net = new Net();
+const net = new LocalEngine();
 let game;
 let fleet;
 let roads;
@@ -1128,54 +1128,17 @@ aboutEl.addEventListener('click', (e) => { if (e.target === aboutEl) closeAbout(
 aboutEl.querySelector('.about-close').addEventListener('click', closeAbout);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAbout(); });
 
-// ── Lobby / rooms (multiplayer) ──
+// ── Full-local start: no server, no rooms ──
+// The game auto-starts — the worker resumes the IndexedDB autosave if there is
+// one, else builds a fresh world. The lobby stays hidden; its "Nouvelle partie"
+// button starts a fresh world (discarding the save).
 const lobbyEl = document.getElementById('lobby');
-const lobbyMsg = document.getElementById('lobby-msg');
 const roomBadge = document.getElementById('room-badge');
+const hideLobby = () => { if (lobbyEl) lobbyEl.style.display = 'none'; };
 
-function showLobby(msg) {
-  lobbyEl.style.display = 'flex';
-  lobbyMsg.textContent = msg || '';
-}
-function hideLobby() { lobbyEl.style.display = 'none'; }
+net.onJoined = () => { hideLobby(); if (roomBadge) roomBadge.hidden = true; };
+net.onJoinError = () => {};   // never fires locally
 
-net.onJoined = (code) => {
-  hideLobby();
-  roomBadge.hidden = false;
-  roomBadge.textContent = `Room ${code}`;
-  // keep the code in the URL so a refresh / shared link rejoins the same game
-  const url = new URL(location.href);
-  if (url.searchParams.get('room') !== code) {
-    url.searchParams.set('room', code);
-    history.replaceState(null, '', url);
-  }
-};
+document.getElementById('lobby-create')?.addEventListener('click', () => { hideLobby(); net.create(); });
 
-net.onJoinError = (reason) => {
-  net.room = null;                          // stop auto-rejoining a dead room
-  const url = new URL(location.href);
-  url.searchParams.delete('room');
-  history.replaceState(null, '', url);
-  showLobby(reason === 'room not found' ? 'Partie introuvable.' : `Erreur: ${reason}`);
-};
-
-document.getElementById('lobby-create').addEventListener('click', () => {
-  showLobby('Création…');
-  net.create();
-});
-const codeInput = document.getElementById('lobby-code');
-const doJoin = () => {
-  const code = codeInput.value.trim().toUpperCase();
-  if (code.length < 4) { lobbyMsg.textContent = 'Entre un code valide.'; return; }
-  showLobby('Connexion…');
-  net.join(code);
-};
-document.getElementById('lobby-join-btn').addEventListener('click', doJoin);
-codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
-
-// On load: auto-join the room from the URL, otherwise show the lobby.
-(function bootstrap() {
-  const code = new URL(location.href).searchParams.get('room');
-  if (code) { showLobby('Connexion…'); net.join(code.toUpperCase()); }
-  else showLobby();
-})();
+hideLobby();   // auto-start straight into the local game

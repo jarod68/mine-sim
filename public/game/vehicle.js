@@ -1,7 +1,7 @@
 // Vehicle physics: cell-stepped movement on the sub-zone grid + the collision
 // footprint other vehicles reserve. Pure of game rules beyond its own constants.
 
-const { BASE_SPEED, SPECS, TRUCK_COLLISION_SCALE } = require('./constants');
+import { BASE_SPEED, SPECS, TRUCK_COLLISION_SCALE } from './constants.js';
 
 class Vehicle {
   constructor({ type, label, gx, gy, len, wid, model, bucket, payload }) {
@@ -160,4 +160,4 @@ class Vehicle {
   }
 }
 
-module.exports = { Vehicle };
+export { Vehicle };

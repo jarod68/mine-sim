@@ -129,7 +129,7 @@ const padSlots = (p) => {
 const rectsOverlap = (a, b) =>
   a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
-module.exports = {
+export {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
   STARTING_CREDIT, DRILL_COST, ROAD_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
   BREAKDOWN_CHANCE, REPAIR_TIME,
