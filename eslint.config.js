@@ -16,9 +16,9 @@ const rules = {
 module.exports = [
   { ignores: ['node_modules/**', 'coverage/**', 'dist/**'] },
 
-  // Server + game logic + Node scripts (load test, screenshots): CommonJS on Node.
+  // Node CommonJS: the static server + the screenshot/visual-server helpers.
   {
-    files: ['server/**/*.js', 'game/**/*.js', 'scripts/**/*.js', 'test/load/**/*.js', 'server.js', 'admin.js'],
+    files: ['serve.js', 'scripts/**/*.js', 'test/visual/**/*.cjs'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs', globals: { ...globals.node } },
     rules,
   },

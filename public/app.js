@@ -1,5 +1,6 @@
-// Thin client: renders authoritative server snapshots and sends commands over a
-// single WebSocket (no HTTP polling). The server owns the entire simulation.
+// Thin client: renders authoritative snapshots and sends commands. In the
+// full-local build the "server" is a Web Worker running the World in this same
+// tab (see engine/local-engine.js), reached through the identical message API.
 
 import { GameCanvas } from './components/game-canvas.js';
 import { BlockPopup } from './components/block-popup.js';
@@ -1128,17 +1129,6 @@ aboutEl.addEventListener('click', (e) => { if (e.target === aboutEl) closeAbout(
 aboutEl.querySelector('.about-close').addEventListener('click', closeAbout);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAbout(); });
 
-// ── Full-local start: no server, no rooms ──
-// The game auto-starts — the worker resumes the IndexedDB autosave if there is
-// one, else builds a fresh world. The lobby stays hidden; its "Nouvelle partie"
-// button starts a fresh world (discarding the save).
-const lobbyEl = document.getElementById('lobby');
-const roomBadge = document.getElementById('room-badge');
-const hideLobby = () => { if (lobbyEl) lobbyEl.style.display = 'none'; };
-
-net.onJoined = () => { hideLobby(); if (roomBadge) roomBadge.hidden = true; };
-net.onJoinError = () => {};   // never fires locally
-
-document.getElementById('lobby-create')?.addEventListener('click', () => { hideLobby(); net.create(); });
-
-hideLobby();   // auto-start straight into the local game
+// ── Full-local start: no server, no rooms, no lobby ──
+// The engine auto-starts in its constructor: the worker resumes the IndexedDB
+// autosave if there is one, else builds a fresh world. Nothing to wire here.

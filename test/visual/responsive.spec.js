@@ -2,11 +2,10 @@ import { test, expect } from '@playwright/test';
 
 // Responsive chrome: render the REAL index.html top bar at a desktop and a phone
 // width and snapshot it, to lock the layout (compact legend, icon-only buttons,
-// nothing clipped/hidden on resize). Served statically, so the app sits at the
-// lobby with no socket — we hide the lobby and paint the legend swatches (the
-// running app would, via build(state)) so the snapshot is representative + stable.
+// nothing clipped/hidden on resize). Served statically; we paint the legend
+// swatches (the running app would, via build(state)) so the snapshot is
+// representative + stable.
 const swatchCSS = `
-  #lobby { display: none !important; }
   .sw[data-ore="unexplored"] { background: #2f6b56; }
   .sw[data-ore="dirt"]       { background: #4a2f19; }
   .sw[data-ore="iron"]       { background: #9a5ce6; }
