@@ -18,6 +18,7 @@ const NET_EVERY = 2;         // emit deltas every Nth tick (~15 Hz)
 const IDLE_EVERY = 6;        // when nothing moves, tick only every Nth frame
 const IDLE_ACTIVE_MS = 1500; // a command keeps the sim "active" this long
 const AUTOSAVE_MS = 10000;   // write-behind snapshot to IndexedDB
+const EXPIRY_CHECK_MS = 60000; // how often to test the 24h auto-reset
 const dt = 1 / TICK_HZ;
 
 let world = null;
@@ -98,15 +99,28 @@ function stepTick() {
   }
 }
 
+function resetGame() {
+  world.reset();
+  clearSave();
+  sendState();
+}
+
+// A game lives GAME_TTL_MS (24h) from its start, then restarts from scratch.
+function checkExpiry() {
+  if (world && world.expired()) resetGame();
+}
+
 function startLoops() {
   if (tickTimer) return;
   tickTimer = setInterval(stepTick, 1000 / TICK_HZ);
   setInterval(persist, AUTOSAVE_MS);
+  setInterval(checkExpiry, EXPIRY_CHECK_MS);
 }
 
 async function init(load) {
   const saved = load ? await loadSave() : null;
   world = saved ? World.fromSnapshot(typeof saved === 'string' ? JSON.parse(saved) : saved) : new World();
+  if (world.expired()) { world.reset(); clearSave(); }   // stale save → fresh game
   lastActivity = Date.now();
   post({ t: 'joined', room: 'LOCAL' });
   sendState();
@@ -153,9 +167,7 @@ self.onmessage = (e) => {
       break;
     }
     case 'reset':
-      world.reset();
-      clearSave();
-      sendState();
+      resetGame();
       break;
     case 'breakdown':
       world.testBreakdown?.();   // local sandbox: always allowed

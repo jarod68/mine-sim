@@ -15,7 +15,7 @@ import {
 } from './world-setup.js';
 import {
   VIEW_W, VIEW_H, COLS, ROWS, BLOCKS_PER_CRUSHER,
-  STARTING_CREDIT, DRILL_COST, ROAD_COST, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
+  STARTING_CREDIT, DRILL_COST, ROAD_COST, GAME_TTL_MS, DOZER_PREP_RANGE, ROAD_WEAR_LIMIT, WORN_SPEED_MULT,
   BREAKDOWN_CHANCE, REPAIR_TIME,
   ORE_VALUE, PARKING, PARK_HEADING,
   EXCAVATORS, SHOVEL_MIN_BLOCK_DIST, CRUSHER_PRICE, MAX_EXTRA_CRUSHERS, MAX_ASSETS, CATALOG,
@@ -39,6 +39,7 @@ class World {
   reset() {
     this.mine = generateMine(COLS, ROWS, this._seed);
     this.credit = STARTING_CREDIT;
+    this.startedAt = Date.now();   // wall-clock start, drives the 24h auto-reset
     this.dirty = new Map();
 
     this.roads = new Roads(this.grid);
@@ -126,6 +127,7 @@ class World {
     return {
       v: 1,
       credit: this.credit,
+      startedAt: this.startedAt,
       boughtCrushers: this._boughtCrushers,
       crushers: this.crushers,
       parking: this.roads.parkings[0] || PARKING,
@@ -163,6 +165,8 @@ class World {
   // the autopilot re-plans from the restored links / move orders).
   _applySnapshot(snap) {
     this.credit = snap.credit ?? STARTING_CREDIT;
+    // Saves predating the auto-reset get a fresh 24h window rather than a wipe.
+    this.startedAt = snap.startedAt ?? Date.now();
     this._boughtCrushers = snap.boughtCrushers || 0;
     this.dirty = new Map();
     this.mine = { cols: COLS, rows: ROWS, blocks: snap.blocks };
@@ -888,6 +892,9 @@ class World {
     };
   }
 
+  // Has this game outlived its GAME_TTL_MS window?
+  expired(now = Date.now()) { return now - this.startedAt >= GAME_TTL_MS; }
+
   fullState() {
     return {
       cols: this.mine.cols,
@@ -895,6 +902,8 @@ class World {
       view: { w: VIEW_W, h: VIEW_H },
       blockTonnage: BLOCK_TONNAGE,
       credit: this.credit,
+      startedAt: this.startedAt,
+      resetAt: this.startedAt + GAME_TTL_MS,
       drillCost: DRILL_COST,
       roadCost: ROAD_COST,
       parking: this.roads.parkings[0] || PARKING,

@@ -4,7 +4,7 @@ import {
   VIEW_W, VIEW_H, COLS, ROWS, DRILL_COST, ROAD_COST, ROAD_WEAR_LIMIT, WORN_SPEED_MULT, REPAIR_TIME,
 } from '../../../public/game/world.js';
 import { sizedParkingRect } from '../../../public/game/world-setup.js';
-import { padSlots } from '../../../public/game/constants.js';
+import { padSlots, GAME_TTL_MS } from '../../../public/game/constants.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -1655,5 +1655,28 @@ describe('World — breakdowns', () => {
     for (const v of w.vehicles) {
       if (v.type === 'pickup' || v.type === 'dozer' || v.type === 'grader') expect(v.broken).toBe(false);
     }
+  });
+});
+
+describe('World — 24h auto-reset', () => {
+  it('expires GAME_TTL_MS after start and survives a snapshot round-trip', () => {
+    const w = new World(1);
+    expect(w.expired(w.startedAt + GAME_TTL_MS - 1)).toBe(false);
+    expect(w.expired(w.startedAt + GAME_TTL_MS)).toBe(true);
+    expect(w.fullState().resetAt).toBe(w.startedAt + GAME_TTL_MS);
+    w.startedAt -= 1000;
+    const r = World.fromSnapshot(JSON.parse(w.snapshotJson()));
+    expect(r.startedAt).toBe(w.startedAt);
+  });
+
+  it('reset() restarts the clock; legacy saves get a fresh window', () => {
+    const w = new World(1);
+    w.startedAt = 0;
+    expect(w.expired()).toBe(true);
+    w.reset();
+    expect(w.expired()).toBe(false);
+    const snap = JSON.parse(w.snapshotJson());
+    delete snap.startedAt;
+    expect(World.fromSnapshot(snap).expired()).toBe(false);
   });
 });

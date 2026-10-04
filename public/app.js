@@ -28,6 +28,7 @@ let blockH = 0;
 let built = false;
 let testMode = false;        // server TEST_MODE → 'P' forces a test breakdown
 let oreStats = null;         // { elapsed, totals, hourly } ore extracted, for the stats graph
+let resetAt = 0;             // wall-clock time of the automatic 24h reset
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.body.classList.add('touch');   // CSS hook: bigger targets, no hover-only UI
 let suppressTap = false;     // set after a touch pan/pinch so the trailing click doesn't drill/select
@@ -68,7 +69,11 @@ function hydrateBlocks(state) {
   state.blocks = grid;
 }
 
-net.onState = (state) => { hydrateBlocks(state); built ? refresh(state) : build(state); };
+net.onState = (state) => {
+  hydrateBlocks(state);
+  if (state.resetAt) { resetAt = state.resetAt; updateResetTitle(); }
+  built ? refresh(state) : build(state);
+};
 net.onLive = (data) => onLive(data);
 net.onPositions = (recs) => { if (fleet) fleet.applyPositions(recs); };
 net.onRoads = (cells) => { if (roads) roads.setNetwork(cells); };
@@ -1128,6 +1133,18 @@ document.getElementById('about-btn').addEventListener('click', () => { aboutEl.h
 aboutEl.addEventListener('click', (e) => { if (e.target === aboutEl) closeAbout(); });
 aboutEl.querySelector('.about-close').addEventListener('click', closeAbout);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAbout(); });
+
+// ── Reset: manual restart, plus the automatic one 24h after the game started ──
+const resetBtn = document.getElementById('reset-btn');
+function updateResetTitle() {
+  const left = Math.max(0, resetAt - Date.now());
+  const h = Math.floor(left / 3600000), m = Math.floor((left % 3600000) / 60000);
+  resetBtn.title = `Restart the game (auto-reset in ${h}h ${m}m)`;
+}
+setInterval(updateResetTitle, 60000);
+resetBtn.addEventListener('click', () => {
+  if (confirm('Restart the game from scratch? All progress will be lost.')) net.reset();
+});
 
 // ── Full-local start: no server, no rooms, no lobby ──
 // The engine auto-starts in its constructor: the worker resumes the IndexedDB
