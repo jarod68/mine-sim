@@ -51,9 +51,10 @@ works just as well:
 npx serve public          # or: python3 -m http.server 3200 --directory public
 ```
 
-> Your game autosaves to the browser's IndexedDB. To start over, use the in-app
-> reset, or clear the site's storage (DevTools → Application → IndexedDB →
-> `minesim`), or just open a private window.
+> Your game autosaves to the browser's IndexedDB. A game lasts **24 hours** from
+> its start, then restarts from scratch automatically. To start over sooner, click
+> **🔄 Reset** in the top bar, clear the site's storage (DevTools → Application →
+> IndexedDB → `minesim`), or just open a private window.
 
 ---
 
@@ -131,6 +132,14 @@ random**: it **freezes in place, smoking**, a popup alerts you, and it's flagged
 a light vehicle (LV) into an adjacent cell** — a green repair ring fills over
 ~5 s, then it runs again.
 
+### Reset & 24h lifetime
+
+Each game lives **24 hours** (wall-clock) from the moment it started — the timer
+keeps running while the tab is closed. Once that window has elapsed the mine is
+regenerated from scratch (checked every minute, and on load for a stale save).
+Hover **🔄 Reset** in the top bar to see the time left before the auto-reset;
+click it (and confirm) to restart right away. All progress is lost on a reset.
+
 ---
 
 ## High-level architecture
@@ -166,7 +175,8 @@ talk over `postMessage` — no server is involved once the static files are load
   **positions** frame. `LocalEngine` is a drop-in for the old WS `Net` client
   (identical methods and callbacks), so the renderer never had to change.
 - **Persistence.** The worker autosaves a JSON world snapshot to **IndexedDB**
-  (write-behind every ~10 s, and on tab hide) and reloads it on boot.
+  (write-behind every ~10 s, and on tab hide) and reloads it on boot — unless the
+  game is older than 24 h, in which case it starts a fresh one.
 
 ---
 
@@ -176,7 +186,10 @@ talk over `postMessage` — no server is involved once the static files are load
 `setInterval` at 30 Hz ticks the `World`; every second tick (15 Hz) it computes a
 delta and posts it. An **adaptive tick** slows to ~5 Hz (with a matching larger
 `dt`) whenever nothing is moving and no command arrived recently, and snaps back
-to full rate on any motion or input — sparing the CPU while a mine idles.
+to full rate on any motion or input — sparing the CPU while a mine idles. A
+second timer checks every minute whether the game has outlived `GAME_TTL_MS`
+(24 h, [`constants.js`](public/game/constants.js)) and, if so, resets the world
+and clears the save.
 
 **Delta broadcasting** ([`World.liveDelta`](public/game/world.js)). The world
 keeps the last values sent per vehicle/credit and emits only what changed —
@@ -279,7 +292,7 @@ under Vitest** for the unit tests — one authoritative codebase, two hosts.
 
 | Class / module | Responsibility |
 | --- | --- |
-| **`World`** | The whole authoritative state. `tick(dt)` advances the sim; commands: `drill(x,y)`, `buyAsset(id)`, `buyCrusher(gx,gy)`, `setRoads(cells)`, `resizeParking(rect)`, `control/moveTo/assign/select/setDebug`, `reset()`. Snapshots: `fullState()` (full), `liveDelta()` (changed-only), `positionsDelta()` (binary), `snapshotJson()` / static `fromSnapshot()` (save/load). |
+| **`World`** | The whole authoritative state. `tick(dt)` advances the sim; commands: `drill(x,y)`, `buyAsset(id)`, `buyCrusher(gx,gy)`, `setRoads(cells)`, `resizeParking(rect)`, `control/moveTo/assign/select/setDebug`, `reset()` (restarts the 24h clock via `startedAt`); `expired()` tells whether the game outlived `GAME_TTL_MS`. Snapshots: `fullState()` (full), `liveDelta()` (changed-only), `positionsDelta()` (binary), `snapshotJson()` / static `fromSnapshot()` (save/load). |
 | **`Vehicle`** | One unit (`pickup` \| `excavator` \| `oht`). Holds pose/load/heading; `update(dt,dir,…)` moves it a cell at a time, `footprintAt()` / `collisionCells()` compute reserved grid cells. |
 | **`Roads`** | The road-cell store (`Map` of sub-zones with optional one-way `dir` + parking flag). `setNetwork(cells)`, `serialize()`, `addParking()`. |
 | **`Autopilot`** | Haul logic: distance-field pathfinding, truck phases (`to_shovel → docking → loading → undocking → to_crusher → dumping → to_parking`), deadlock/yield, shovel dodge & relocation. |
@@ -289,7 +302,7 @@ under Vitest** for the unit tests — one authoritative codebase, two hosts.
 
 | Class / module | Responsibility |
 | --- | --- |
-| `worker.js` | The module Web Worker. Owns one `World`, runs the 30 Hz tick + adaptive idle, applies commands from the main thread, posts `state`/`live`/positions and reply messages, and autosaves to IndexedDB. |
+| `worker.js` | The module Web Worker. Owns one `World`, runs the 30 Hz tick + adaptive idle, applies commands from the main thread, posts `state`/`live`/positions and reply messages, autosaves to IndexedDB, and enforces the 24h auto-reset. |
 | **`LocalEngine`** | Main-thread facade that spins up the worker and mirrors the old WS `Net` API (same methods and `on*` callbacks). Saves on `pagehide`/`visibilitychange`; `reset()` clears the save. |
 
 ### Client renderers ([`public/components/`](public/components))
@@ -336,7 +349,7 @@ The main thread and the worker exchange JSON messages tagged by `t` over
 | `t` | Payload | When |
 | --- | --- | --- |
 | `joined` | `room: 'LOCAL'` | Once, after `init` (keeps the old join handshake). |
-| `state` | `state` (full snapshot) | After `init`, and after `reset`. |
+| `state` | `state` (full snapshot) | After `init`, and after a manual or automatic (24h) `reset`. |
 | `drilled` | `x, y, block, credit, error` | Reply to `drill`. |
 | `roads` | `cells` | After a road edit dropped cells over budget (canonical correction). |
 | `roadSpend` | `cost, gx, gy` | After a road edit that cost credit. |
@@ -348,7 +361,8 @@ The main thread and the worker exchange JSON messages tagged by `t` over
 | *(binary)* | `pos` frame | Per-tick vehicle positions, compact binary: `[u8 type=1][u16 count]{ u16 id, f32 x, f32 y, f32 heading, u16 gx, u16 gy }`, transferred (zero-copy). |
 
 The full **`state`** snapshot carries: `cols`, `rows`, `view {w,h}`,
-`blockTonnage`, `credit`, `drillCost`, `parking`, `crushers`, `catalog`,
+`blockTonnage`, `credit`, `startedAt`, `resetAt` (when the 24h auto-reset
+fires), `drillCost`, `roadCost`, `parking`, `crushers`, `catalog`,
 `maxAssets`, `roads`, `vehicles[]` (each with a stable `id`), and `blocks[]` —
 only the **significant** blocks (explored or a vein); the client defaults the rest
 to unexplored.
@@ -359,7 +373,10 @@ The worker persists the world to **IndexedDB** — database `minesim`, object st
 `save`, key `world` — as a JSON snapshot from `World.snapshotJson()`. It writes
 **behind** the simulation (every ~10 s) and again when the tab is hidden
 (`LocalEngine` posts a `save` on `pagehide`/`visibilitychange`), and reloads it on
-`init`. `reset` clears the save. Nothing ever leaves the browser.
+`init`. The snapshot includes `startedAt`; a save older than 24 h is discarded
+on `init` in favour of a fresh game (saves predating this field get a fresh 24h
+window instead of a wipe). `reset` clears the save. Nothing ever leaves the
+browser.
 
 ---
 
@@ -378,7 +395,7 @@ npm run test:visual       # visual regression (Playwright) → test/visual/
 
 | Path | What it covers |
 | --- | --- |
-| `test/unit/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock/yield timeouts, docking, dodge, off-road recovery), parking (slot grid, occupancy-aware assignment, overflow waiting, resize), grader dispatch/dispersion, shovel spacing & road-clear relocation, rich-vein dozer prep, direct move-to & manual pass-through, a full **haul-cycle integration** run. |
+| `test/unit/game/world.test.js` | Vehicles, footprints/collision, the autopilot (pathfinding, overtaking, deadlock/yield timeouts, docking, dodge, off-road recovery), parking (slot grid, occupancy-aware assignment, overflow waiting, resize), grader dispatch/dispersion, shovel spacing & road-clear relocation, rich-vein dozer prep, direct move-to & manual pass-through, breakdowns, the 24h auto-reset (expiry, snapshot round-trip, legacy saves), a full **haul-cycle integration** run. |
 | `test/unit/game/mine.test.js` | Mine generation, ore deposits, rich veins (deterministic via seed). |
 | `test/unit/client/*.test.js` | Client renderers/helpers in happy-dom (camera, mine, roads, vehicle). |
 
