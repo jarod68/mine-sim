@@ -66,10 +66,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   # Software supply-chain: generate a CycloneDX SBOM from the freshly-pushed
-  # image with Syft, scan it with Grype (report-only gate), and upload the SBOM
-  # to Dependency-Track (https://dtrack.holtz.fr) for continuous SCA. Needs repo
-  # secrets DTRACK_URL and DTRACK_API_KEY (an automation-team key with
-  # BOM_UPLOAD + PROJECT_CREATION_UPLOAD).
+  # image with Syft and scan it with Grype (report-only gate).
   sbom:
     runs-on: ubuntu-latest
     needs: docker
@@ -80,31 +77,9 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh  | sh -s -- -b /usr/local/bin
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
       - name: Generate CycloneDX SBOM (Syft)
-        # Pin the CycloneDX spec to 1.6 — recent Syft defaults to 1.7, which
-        # Dependency-Track 4.12 rejects with HTTP 400 (it supports up to 1.6).
+        # Pin the CycloneDX spec to 1.6 (recent Syft defaults to 1.7) for
+        # compatibility with tools that only read up to 1.6.
         run: syft "jarod68/mine-sim:latest" -o cyclonedx-json@1.6=sbom.cdx.json
       - name: Scan the SBOM (Grype)
         # Report-only for now — drop `|| true` to fail the build on a critical CVE.
         run: grype "sbom:sbom.cdx.json" --fail-on critical || true
-      - name: Upload SBOM to Dependency-Track
-        env:
-          DTRACK_URL: ${{ secrets.DTRACK_URL }}
-          DTRACK_API_KEY: ${{ secrets.DTRACK_API_KEY }}
-          # "user:password" for the Traefik basic-auth guarding dtrack.holtz.fr.
-          DTRACK_BASIC_AUTH: ${{ secrets.DTRACK_BASIC_AUTH }}
-        run: |
-          # If the dtrack host's /api is behind Traefik basic-auth, send those
-          # creds too (set DTRACK_BASIC_AUTH); Dependency-Track authenticates the
-          # upload itself via X-Api-Key. When /api is open, leave the secret unset.
-          auth=()
-          [ -n "$DTRACK_BASIC_AUTH" ] && auth=(-u "$DTRACK_BASIC_AUTH")
-          # Capture DT's response body — it explains a 400 (bad BOM / spec version).
-          code=$(curl -sS -o resp.txt -w '%{http_code}' -X POST "$DTRACK_URL/api/v1/bom" \
-            "${auth[@]}" \
-            -H "X-Api-Key: $DTRACK_API_KEY" \
-            -F "autoCreate=true" \
-            -F "projectName=mine-sim" \
-            -F "projectVersion=latest" \
-            -F "bom=@sbom.cdx.json")
-          echo "HTTP $code"; cat resp.txt; echo
-          [ "$code" -lt 300 ] || exit 1
