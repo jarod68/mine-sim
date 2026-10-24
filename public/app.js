@@ -1132,11 +1132,15 @@ const closeAbout = () => { aboutEl.hidden = true; };
 document.getElementById('about-btn').addEventListener('click', () => { aboutEl.hidden = !aboutEl.hidden; });
 aboutEl.addEventListener('click', (e) => { if (e.target === aboutEl) closeAbout(); });
 aboutEl.querySelector('.about-close').addEventListener('click', closeAbout);
-// Build stamp (version.json is written by the Docker build; absent in dev).
+// Build stamp (version.json is written by the Docker build; absent in dev),
+// shown in the corner and in the How-to-play footer.
 fetch('version.json', { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : null))
   .catch(() => null)
-  .then((v) => { document.getElementById('about-build').textContent = `build ${v?.sha?.slice(0, 7) || 'dev'}`; });
+  .then((v) => {
+    const label = `build ${v?.sha?.slice(0, 7) || 'dev'}`;
+    for (const id of ['build-tag', 'about-build']) document.getElementById(id).textContent = label;
+  });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAbout(); });
 
 // ── Reset: manual restart, plus the automatic one 24h after the game started ──

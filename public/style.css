@@ -660,6 +660,11 @@ main {
 }
 .about-gh:hover { background: #2f74e0; }
 .about-build { margin-left: 10px; color: #7d8590; font: 12px ui-monospace, monospace; }
+/* Always-visible build stamp, bottom-left corner — out of the way of input. */
+.build-tag {
+  position: fixed; left: 8px; bottom: 6px; z-index: 5; pointer-events: none;
+  color: #7d8590; opacity: 0.8; font: 11px ui-monospace, monospace;
+}
 
 .shop-row {
   display: flex;
