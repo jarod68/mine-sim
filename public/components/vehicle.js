@@ -162,7 +162,7 @@ export class Vehicle {
       const tw = Math.ceil(ctx.measureText(this.label).width);
       ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
       ctx.fillRect(-tw / 2 - 3, y - 14, tw + 6, 15);
-      ctx.fillStyle = selected ? '#ffff55' : '#ffffff';
+      ctx.fillStyle = selected ? '#f2b45a' : '#ffffff';
       ctx.fillText(this.label, 0, y);
       ctx.restore();
     }

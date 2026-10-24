@@ -399,11 +399,11 @@ export class Roads {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     applyCamera(ctx, this.dpr);
 
-    // blocky dirt-path surface, one 16×16 texture per cell (slight overlap hides
-    // sub-pixel seams between cells). Degraded cells turn to rutted gravel.
+    // pale compacted-dust haul road, one 16×16 texture per cell (slight overlap
+    // hides sub-pixel seams between cells). Degraded cells turn rutted and dark.
     ctx.imageSmoothingEnabled = false;
-    const pathFill = cellPattern(ctx, 'path', zoneW, zoneH);
-    const wornFill = cellPattern(ctx, 'gravel', zoneW, zoneH);
+    const pathFill = cellPattern(ctx, 'haulroad', zoneW, zoneH);
+    const wornFill = cellPattern(ctx, 'rutted', zoneW, zoneH);
     for (const c of this.cells.values()) {
       if (c.parking) continue;
       ctx.fillStyle = c.worn ? wornFill : pathFill;
@@ -454,7 +454,7 @@ export class Roads {
       const y = p.y * zoneH;
       const w = p.w * zoneW;
       const h = p.h * zoneH;
-      ctx.fillStyle = cellPattern(ctx, 'bricks', zoneW, zoneH);   // stone-brick pad
+      ctx.fillStyle = cellPattern(ctx, 'pad', zoneW, zoneH);      // concrete slabs
       ctx.fillRect(x, y, w, h);
       ctx.strokeStyle = '#f2b81c';
       ctx.lineWidth = 2;
@@ -474,7 +474,7 @@ export class Roads {
       const y = cr.y * zoneH;
       const w = cr.w * zoneW;
       const h = cr.h * zoneH;
-      ctx.fillStyle = cellPattern(ctx, 'cobble', zoneW, zoneH);   // cobblestone body
+      ctx.fillStyle = cellPattern(ctx, 'concrete', zoneW, zoneH); // concrete plant
       ctx.fillRect(x, y, w, h);
       ctx.fillStyle = '#26262a';            // hopper
       ctx.beginPath();

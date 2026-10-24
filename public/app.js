@@ -129,8 +129,9 @@ document.fonts?.ready.then(() => invalidateAll());
 // ── helpers ──
 // Hand the procedural textures to the CSS theme (backdrop, buttons, panels).
 function paintTheme() {
-  for (const kind of ['dirt', 'stone', 'grass', 'gold'])
-    document.documentElement.style.setProperty(`--tex-${kind}`, `url(${textureURL(kind)})`);
+  const vars = { backdrop: 'pit', button: 'sandstone', active: 'hivis', drill: 'gold' };
+  for (const [name, kind] of Object.entries(vars))
+    document.documentElement.style.setProperty(`--tex-${name}`, `url(${textureURL(kind)})`);
 }
 paintTheme();
 

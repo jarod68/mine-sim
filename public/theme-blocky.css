@@ -1,9 +1,11 @@
 /* ──────────────────────────────────────────────────────────────────────────────
-   Blocky theme — a voxel-sandbox look layered over style.css (which keeps the
-   layout). Pixel font, square corners, bevelled stone buttons, dark tooltip-
-   style panels with a purple edge, and a darkened dirt backdrop. The pixel
-   textures come from components/textures.js via --tex-* custom properties set
-   at startup (app.js), so the CSS and the map share the very same texels.
+   Blocky theme — a pixel-art look in the colours of an Australian open-pit
+   mine, layered over style.css (which keeps the layout). Pixel font, square
+   corners, bevelled sandstone buttons, hi-vis orange for the engaged tool,
+   dark charcoal-brown panels with an ochre-to-rust edge, and a darkened
+   red-earth backdrop. The pixel textures come from components/textures.js via
+   --tex-* custom properties set at startup (app.js), so the CSS and the map
+   share the very same texels.
    ────────────────────────────────────────────────────────────────────────────── */
 
 @font-face {
@@ -15,18 +17,19 @@
 
 :root {
   --px-font: 'Pixelify Sans', system-ui, sans-serif;
-  --ink: #ffffff;
-  --ink-dim: #c6c6c6;
-  --ink-mute: #9a9a9a;
-  --shadow: #3f3f3f;
-  --gold: #ffd23f;
-  --green: #55ff55;
-  --yellow: #ffff55;
-  --aqua: #55ffff;
-  --red: #ff5555;
-  --tip-bg: rgba(16, 0, 16, 0.94);
-  --tip-edge-top: #5000ff;
-  --tip-edge-bottom: #28007f;
+  --ink: #fbf1e3;
+  --ink-dim: #d9c7b0;
+  --ink-mute: #a8957f;
+  --shadow: #3a2418;
+  --gold: #f2c14e;
+  --money: #c7d98f;       /* saltbush green */
+  --accent: #f2b45a;      /* ochre — titles, selection */
+  --sage: #a9bd9a;        /* eucalyptus — section headings */
+  --hivis: #ff7a1a;
+  --red: #ff6b4a;
+  --tip-bg: rgba(30, 20, 15, 0.95);
+  --tip-edge-top: #d08a3c;
+  --tip-edge-bottom: #7d3418;
 }
 
 /* square everything — no rounded corners anywhere in this world */
@@ -37,14 +40,14 @@ body {
   color: var(--ink);
   background:
     linear-gradient(rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0.62)),
-    var(--tex-dirt, #3b2a1d) repeat;
+    var(--tex-backdrop, #5f2f1b) repeat;
   background-size: auto, 64px 64px;
   image-rendering: pixelated;
   text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.55);
 }
 canvas { image-rendering: auto; }
 
-/* ── Buttons: bevelled stone slabs ─────────────────────────────────────────── */
+/* ── Buttons: bevelled sandstone slabs ─────────────────────────────────────────── */
 .topbar button,
 button.asset-btn, .shop-buy, .al-locate, .about-gh, .popup .drill,
 .breakdown-alert .bd-locate {
@@ -52,7 +55,7 @@ button.asset-btn, .shop-buy, .al-locate, .about-gh, .popup .drill,
   font-weight: 500;
   color: #fff;
   text-shadow: 2px 2px 0 var(--shadow);
-  background: linear-gradient(rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.22)), var(--tex-stone, #7f7f7f);
+  background: linear-gradient(rgba(40, 20, 10, 0.32), rgba(40, 20, 10, 0.32)), var(--tex-button, #a8743f);
   background-size: auto, 32px 32px;
   border: 2px solid #000;
   box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.38), inset -2px -3px 0 rgba(0, 0, 0, 0.42);
@@ -61,33 +64,33 @@ button.asset-btn, .shop-buy, .al-locate, .about-gh, .popup .drill,
 .topbar button:hover,
 button.asset-btn:hover, .shop-buy:hover:not(:disabled), .al-locate:hover, .about-gh:hover, .popup .drill:hover,
 .breakdown-alert .bd-locate:hover {
-  color: var(--yellow);
-  border-color: #fff;
-  background: linear-gradient(rgba(110, 130, 255, 0.28), rgba(110, 130, 255, 0.28)), var(--tex-stone, #7f7f7f);
+  color: #fff;
+  border-color: var(--accent);
+  background: linear-gradient(rgba(255, 220, 160, 0.16), rgba(255, 220, 160, 0.16)), var(--tex-button, #a8743f);
   background-size: auto, 32px 32px;
 }
 .topbar button:active, .shop-buy:active, .asset-btn:active {
   box-shadow: inset -2px -2px 0 rgba(255, 255, 255, 0.3), inset 2px 3px 0 rgba(0, 0, 0, 0.45);
 }
-/* the lit tool toggle / an engaged action: grass-green slab */
+/* the lit tool toggle / an engaged action: hi-vis orange slab */
 .modes .mode.active,
 button.asset-btn.active {
   color: #fff;
   border-color: #fff;
-  background: linear-gradient(rgba(40, 140, 30, 0.35), rgba(40, 140, 30, 0.35)), var(--tex-grass, #5d9a35);
+  background: linear-gradient(rgba(120, 40, 0, 0.18), rgba(120, 40, 0, 0.18)), var(--tex-active, #e8651c);
   background-size: auto, 32px 32px;
   box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.35), inset -2px -3px 0 rgba(0, 0, 0, 0.45);
 }
 .shop-buy:disabled {
-  color: #a0a0a0;
+  color: #8a7866;
   text-shadow: none;
-  background: #2c2c2c;
-  border-color: #000;
+  background: #2a1d16;
+  border-color: #120a06;
   box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.08);
 }
-/* the drill button: gold-flecked ore slab */
+/* the drill button: gold-flecked rock slab */
 .popup .drill {
-  background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), var(--tex-gold, #d9a521);
+  background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), var(--tex-drill, #b8862b);
   background-size: auto, 32px 32px;
 }
 
@@ -98,7 +101,7 @@ button.asset-btn.active {
   text-shadow: 2px 2px 0 var(--shadow);
 }
 .al-close:hover, .shop-close:hover, .about-close:hover, .popup .close:hover, .breakdown-alert .bd-close:hover {
-  color: var(--yellow);
+  color: var(--accent);
 }
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
@@ -106,7 +109,7 @@ button.asset-btn.active {
   font-family: var(--px-font);
   font-size: 22px;
   color: var(--gold);
-  text-shadow: 2px 2px 0 #5a3d00;
+  text-shadow: 2px 2px 0 #4a2a0a;
 }
 .legend { color: var(--ink-dim); font-size: 12px; }
 .sw {
@@ -120,41 +123,41 @@ button.asset-btn.active {
 
 /* ── Map frame: a deep inset slot ─────────────────────────────────────────── */
 main {
-  background: #120d09;
-  border: 3px solid #000;
-  box-shadow: 0 0 0 2px #6b6b6b, 0 0 0 4px #000, 0 8px 0 4px rgba(0, 0, 0, 0.35);
+  background: #1e120d;
+  border: 3px solid #120a06;
+  box-shadow: 0 0 0 2px #8a5a36, 0 0 0 4px #120a06, 0 8px 0 4px rgba(0, 0, 0, 0.35);
 }
 
-/* ── Panels, modals & popups: dark tooltip with a purple edge ─────────────── */
+/* ── Panels, modals & popups: charcoal-brown with an ochre-to-rust edge ─────────────── */
 .asset-panel, .asset-list, .popup, .shop-card, .stats-card, .about-card,
 .place-hint, .breakdown-alert {
   background: var(--tip-bg);
   color: var(--ink);
   border: 2px solid;
   border-image: linear-gradient(var(--tip-edge-top), var(--tip-edge-bottom)) 1;
-  box-shadow: 0 0 0 2px #100010, 0 10px 0 rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 2px #120a06, 0 10px 0 rgba(0, 0, 0, 0.35);
 }
 .al-head, .about-head {
   background: rgba(255, 255, 255, 0.05);
-  border-bottom: 2px solid rgba(80, 0, 255, 0.45);
+  border-bottom: 2px solid rgba(208, 138, 60, 0.45);
 }
-.about-head { background: #1a051f; }
+.about-head { background: #24170f; }
 .al-title, .shop-head, .about-head, .popup header {
-  color: var(--yellow);
+  color: var(--accent);
   text-shadow: 2px 2px 0 var(--shadow);
   font-weight: 600;
 }
 .about-close { color: var(--ink-dim); }
-.about-body h3 { color: var(--aqua); text-shadow: 2px 2px 0 #0a3b3b; }
+.about-body h3 { color: var(--sage); text-shadow: 2px 2px 0 #1f2a1a; }
 .about-goal, .stats-chart-wrap {
   background: rgba(0, 0, 0, 0.45);
-  border: 2px solid #373737;
+  border: 2px solid #4a3326;
 }
 .about-flow { color: var(--ink-dim); }
 .about-body kbd {
   font-family: var(--px-font);
   color: #fff;
-  background: var(--tex-stone, #7f7f7f);
+  background: var(--tex-button, #a8743f);
   background-size: 24px 24px;
   border: 1px solid #000;
   box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35), inset -1px -2px 0 rgba(0, 0, 0, 0.45);
@@ -167,24 +170,24 @@ main {
 }
 .hint { color: var(--ink-mute); }
 
-.place-hint { color: var(--yellow); font-family: var(--px-font); }
+.place-hint { color: var(--accent); font-family: var(--px-font); }
 .breakdown-alert { color: #ffd0d0; font-family: var(--px-font); }
 .park-label {
   font-family: var(--px-font);
   background: var(--tip-bg);
-  color: var(--yellow);
+  color: var(--accent);
   border: 1px solid var(--tip-edge-bottom);
 }
-.park-handle { background: var(--yellow); border: 2px solid #000; box-shadow: none; }
+.park-handle { background: var(--hivis); border: 2px solid #000; box-shadow: none; }
 
 /* fleet list & asset details */
-.al-group { color: var(--aqua); font-weight: 600; }
-.al-count { color: #000; background: var(--green); text-shadow: none; }
+.al-group { color: var(--sage); font-weight: 600; }
+.al-count { color: #1e120d; background: var(--accent); text-shadow: none; }
 .al-row:hover { background: rgba(255, 255, 255, 0.08); }
-.al-row.sel { border-color: var(--yellow); background: rgba(255, 255, 85, 0.1); }
+.al-row.sel { border-color: var(--accent); background: rgba(242, 180, 90, 0.12); }
 .al-row.broken .al-name, .al-broken, .al-stats .al-bad,
 #asset-details .ai-broken b { color: var(--red); }
-.al-stats .al-ok { color: var(--green); }
+.al-stats .al-ok { color: var(--money); }
 .al-name .al-model, .al-stats, #asset-details .ai i, #asset-details .muted, .shop-spec, .shop-meta,
 .popup .row .pct, .popup .total, .popup .unknown, .stats-empty, .stats-foot { color: var(--ink-dim); }
 #asset-details .ai { border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
@@ -192,27 +195,27 @@ main {
 /* text fields: black well with a grey rim */
 #asset-details select, #vehicle-menu select {
   font-family: var(--px-font);
-  background: #000;
-  color: #e0e0e0;
-  border: 2px solid #a0a0a0;
+  background: #140c08;
+  color: var(--ink);
+  border: 2px solid #8a6a52;
 }
 
 /* shop & stats */
 .shop-row { border-top: 1px solid rgba(255, 255, 255, 0.1); }
-.shop-price { color: var(--green); text-shadow: 2px 2px 0 #0b3b0b; }
+.shop-price { color: var(--money); text-shadow: 2px 2px 0 #26300f; }
 .stat-chip {
-  background: rgba(0, 0, 0, 0.45);
-  border: 2px solid #373737;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid #4a3326;
 }
-.stat-grand { color: var(--green); border-color: #1f6b1f; background: rgba(20, 70, 20, 0.45); }
+.stat-grand { color: var(--money); border-color: #5c6b2f; background: rgba(70, 80, 30, 0.35); }
 .stats-svg .ax { fill: var(--ink-dim); font-family: var(--px-font); }
 .stats-svg .grid { stroke: rgba(255, 255, 255, 0.1); }
 
 /* block popup gauge */
-.popup .bar { background: #000; border: 1px solid #373737; height: 12px; }
+.popup .bar { background: #140c08; border: 1px solid #4a3326; height: 12px; }
 .popup .swatch { border: 1px solid #000; }
 .popup .note { color: var(--red); }
 
 @media (max-width: 768px) {
-  .asset-list, .asset-panel, .asset-panel.with-fleet { background: #100010; }
+  .asset-list, .asset-panel, .asset-panel.with-fleet { background: #1e140f; }
 }

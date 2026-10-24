@@ -1,7 +1,10 @@
 // Blocky 16×16 pixel textures, generated procedurally (no image assets) and
-// cached: grass for unexplored ground, dirt, stone flecked with ore, deepslate
-// for unprepared rich veins, and the surfaces roads / pads / crushers use.
-// Every texture is deterministic, so a block always looks the same.
+// cached, in the palette of an Australian open-pit iron mine: red-ochre soil
+// with spinifex tufts (unexplored ground), the brown-red pit floor (mined
+// out), red-grey host rock flecked with ore, dark ironstone (unprepared rich
+// veins), pale compacted-dust haul roads, concrete pads and plant — plus the
+// sandstone / hi-vis surfaces the UI theme uses. Every texture is
+// deterministic, so a block always looks the same.
 
 export const TEX = 16;   // texels per side
 
@@ -20,21 +23,27 @@ function prng(seed) {
 }
 
 const BASES = {
-  grass:     { seed: 11, pal: ['#56693a', '#5f7340', '#4c5e33', '#677a47', '#516437'] },   // muted moss
-  dirt:      { seed: 23, pal: ['#866043', '#79553a', '#96704e', '#6b4a30', '#8c6748'] },
-  stone:     { seed: 37, pal: ['#7f7f7f', '#8b8b8b', '#747474', '#6c6c6c', '#959595'] },
-  deepslate: { seed: 41, pal: ['#4b4b52', '#56565e', '#3f3f46', '#5f5f68', '#45454c'] },
-  path:      { seed: 53, pal: ['#9b7b45', '#a8884f', '#8e6f3d', '#b39459', '#947440'] },
-  gravel:    { seed: 59, pal: ['#6f5a3a', '#5e4b30', '#7d6744', '#544329', '#836c47'] },
-  cobble:    { seed: 61, pal: ['#6e6e6e', '#7c7c7c', '#5d5d5d', '#8a8a8a', '#4f4f4f'] },
+  soil:      { seed: 11, pal: ['#a4532f', '#b05e36', '#9a4b2a', '#b8693d', '#93472a'] },   // red ochre
+  pit:       { seed: 23, pal: ['#7a3f24', '#6e3820', '#85482a', '#5f2f1b', '#8c4e2f'] },   // pit floor
+  rock:      { seed: 37, pal: ['#8a6a5a', '#7d5f50', '#96766a', '#6f5446', '#a08070'] },   // host rock
+  ironstone: { seed: 41, pal: ['#4a3530', '#553d36', '#3f2d29', '#5f463e', '#45322d'] },   // rich vein
+  haulroad:  { seed: 53, pal: ['#d1ad7a', '#c9a36f', '#dab887', '#bf9864', '#d6b27f'] },   // compacted dust
+  rutted:    { seed: 59, pal: ['#9a7650', '#8c6a46', '#a6825a', '#7f5f3e', '#93704b'] },   // worn road
+  concrete:  { seed: 61, pal: ['#9a948a', '#8f897f', '#a59f95', '#857f76', '#aaa49a'] },
+  sandstone: { seed: 67, pal: ['#a8743f', '#9c6a38', '#b27c45', '#916234', '#ad7842'] },   // UI buttons
+  hivis:     { seed: 71, pal: ['#e8651c', '#f06f22', '#dc5d18', '#f47a2c', '#e36a1f'] },   // UI active
 };
 
-// Ore flecks over stone: light / mid / dark shades of each ore.
+// Spinifex tufts scattered on the soil (texel offsets): dusty sage greens.
+const SPINIFEX = [[3, 4], [4, 4], [4, 3], [11, 9], [12, 9], [12, 8], [6, 13], [7, 13]];
+const SPINIFEX_PAL = ['#8d8a55', '#7a7a4a', '#9a965e'];
+
+// Ore flecks over host rock: light / mid / dark shades of each ore.
 const ORES = {
-  iron:   ['#e8c7aa', '#d8af93', '#a87e62'],
-  copper: ['#f08d4f', '#c9662f', '#5aa88f'],   // last = verdigris
-  gold:   ['#fff8a0', '#fcee4b', '#d9a521'],
-  carbon: ['#3a3a3a', '#232323', '#111111'],
+  iron:   ['#b0453a', '#7d2a24', '#3e1714'],   // hematite: rust red to near-black
+  copper: ['#5fbf95', '#2f8a68', '#2b5f8a'],   // malachite greens, azurite blue edge
+  gold:   ['#ffe08a', '#f2c14e', '#b8862b'],
+  carbon: ['#2e2926', '#1f1b19', '#0f0d0c'],
 };
 
 // Fixed vein clusters (texel offsets), shared by every ore so they read as one family.
@@ -67,27 +76,28 @@ function bevel(ctx, alpha) {
   ctx.fillRect(0, 0, 1, TEX);
 }
 
-function bricks(ctx) {
-  noise(ctx, BASES.stone);
-  ctx.fillStyle = '#4e4e4e';                       // mortar
-  for (let y = 0; y < TEX; y += 4) ctx.fillRect(0, y + 3, TEX, 1);
-  for (let row = 0; row < 4; row++) {
-    const off = row % 2 ? 4 : 0;
-    for (let x = off; x < TEX; x += 8) ctx.fillRect(x, row * 4, 1, 3);
-  }
+// Concrete pad: 8×8 slabs with darker saw-cut joints.
+function slabs(ctx) {
+  noise(ctx, BASES.concrete);
+  ctx.fillStyle = '#6f6a62';
+  for (const o of [7, 15]) { ctx.fillRect(0, o, TEX, 1); ctx.fillRect(o, 0, 1, TEX); }
 }
 
 function draw(kind, ctx) {
+  if (kind === 'pad') { slabs(ctx); return; }
   if (BASES[kind]) {
     noise(ctx, BASES[kind]);
-    if (kind === 'grass' || kind === 'dirt' || kind === 'deepslate') bevel(ctx, 0.12);
+    if (kind === 'soil') {
+      const r = prng(BASES.soil.seed + 5);
+      for (const [x, y] of SPINIFEX) { ctx.fillStyle = SPINIFEX_PAL[Math.floor(r() * 3)]; ctx.fillRect(x, y, 1, 1); }
+    }
+    if (kind === 'soil' || kind === 'pit' || kind === 'ironstone') bevel(ctx, 0.12);
     return;
   }
-  if (kind === 'bricks') { bricks(ctx); return; }
   const ore = ORES[kind];
   if (!ore) throw new Error(`unknown texture: ${kind}`);
-  noise(ctx, BASES.stone);
-  const r = prng(BASES.stone.seed + kind.length * 97);
+  noise(ctx, BASES.rock);
+  const r = prng(BASES.rock.seed + kind.length * 97);
   for (const cl of CLUSTERS)
     for (const [x, y] of cl) {
       ctx.fillStyle = ore[Math.floor(r() * 2)];      // light / mid body
@@ -98,8 +108,8 @@ function draw(kind, ctx) {
   bevel(ctx, 0.1);
 }
 
-// The 16×16 canvas for `kind` (grass, dirt, stone, deepslate, path, gravel,
-// cobble, bricks, or an ore: iron, copper, gold, carbon).
+// The 16×16 canvas for `kind` (soil, pit, rock, ironstone, haulroad, rutted,
+// concrete, pad, sandstone, hivis, or an ore: iron, copper, gold, carbon).
 export function texture(kind) {
   let c = cache.get(kind);
   if (!c) {
@@ -129,7 +139,7 @@ export function textureURL(kind) {
 
 // Mine-grid material → texture kind.
 export const BLOCK_TEXTURE = {
-  unexplored: 'grass', dirt: 'dirt', prep: 'deepslate',
+  unexplored: 'soil', dirt: 'pit', prep: 'ironstone',
   iron: 'iron', copper: 'copper', gold: 'gold', carbon: 'carbon',
 };
 
