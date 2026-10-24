@@ -5,7 +5,7 @@
 // modules (vehicle / roads / autopilot / min-heap / constants); this file is the
 // orchestrator: world setup, the tick loop, commands, economy, snapshots.
 
-import { generateMine, rebuildVeins, BLOCK_TONNAGE } from './mine.js';
+import { generateMine, rebuildVeins, setOre, BLOCK_TONNAGE } from './mine.js';
 import { Vehicle } from './vehicle.js';
 import { Roads } from './roads.js';
 import { Autopilot } from './autopilot.js';
@@ -87,6 +87,9 @@ class World {
     this.autopilot.addShovel(hex2);
     this.autopilot.addShovel(hex3);
     this.autopilot.addShovel(hex4);
+    // Worked example from the first second: HEX01 starts on an already-drilled
+    // ore block beside the demo loop, served by OHT01 + OHT02 (assigned below).
+    if (circuit) this._placeExampleShovel(hex1, circuit.cells);
     this.autopilot.assign(oht1, hex1);
     this.autopilot.assign(oht2, hex1);
     this.autopilot.assign(oht3, hex2);
@@ -115,6 +118,49 @@ class World {
     this._debug = new Set();   // labels with debug-path visualisation enabled
     this._gridDirty = true; this._gridJson = null;   // cached mine-grid JSON (persistence)
     this._occ = null;          // collision occupancy index (built each tick)
+  }
+
+  // Settle `shovel` on an explored ore block next to the demo circuit, as close to
+  // the loop's crusher as possible: off the road, with a road cell touching its
+  // body (so trucks load straight from the loop) and ≥3 blocks from every other
+  // shovel (the shop's spawn spacing). The block is revealed (and given ore if it had none). Returns the
+  // block, or null if no spot fits (the shovel then keeps its default position).
+  _placeExampleShovel(shovel, cells) {
+    const ap = this.autopilot;
+    const cr = this.crushers[0];
+    const cbx = (cr.x + cr.w / 2) / 2, cby = (cr.y + cr.h / 2) / 2;
+    const others = this.vehicles.filter((v) => v.type === 'excavator' && v !== shovel);
+
+    // Candidate blocks: every block within one block of a loop cell.
+    const cand = new Map();
+    for (const { gx, gy } of cells) {
+      const bx = Math.floor(gx / 2), by = Math.floor(gy / 2);
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const b = this.mine.blocks[by + dy]?.[bx + dx];
+          if (b) cand.set(`${b.x},${b.y}`, b);
+        }
+    }
+    const sorted = [...cand.values()].sort((a, b) =>
+      Math.hypot(a.x - cbx, a.y - cby) - Math.hypot(b.x - cbx, b.y - cby));
+
+    const { gx: gx0, gy: gy0 } = shovel;
+    for (const b of sorted) {
+      if (b.prep || ap._blockOnRoad(b.x, b.y)) continue;
+      if (others.some((o) => Math.max(Math.abs(Math.floor(o.gx / 2) - b.x),
+                                      Math.abs(Math.floor(o.gy / 2) - b.y)) < 3)) continue;
+      const place = ap._shovelPlacement(shovel, b.x, b.y);
+      if (!place) continue;
+      shovel.gx = place.gx; shovel.gy = place.gy;
+      if (!ap._shovelRoadBays(shovel).size) continue;   // must load from the loop itself
+      shovel.tgx = shovel.fromGx = place.gx; shovel.tgy = shovel.fromGy = place.gy;
+      shovel.place(this.grid);
+      if (!b.ore || b.oreRemaining <= 0) setOre(b, 'iron', 40);
+      b.explored = true;
+      return b;
+    }
+    shovel.gx = gx0; shovel.gy = gy0;
+    return null;
   }
 
   // ── persistence ──

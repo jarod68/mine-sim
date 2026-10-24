@@ -8,6 +8,18 @@ import { padSlots, GAME_TTL_MS } from '../../../public/game/constants.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
+// HEX01 starts as the worked example (on drilled ore beside the demo loop).
+// Scenario tests built around its classic spot put it back there first and
+// hide the example block, so it can't attract a relocating shovel.
+function hex01AtDefault(w) {
+  const hex = w.byLabel.get('HEX01');
+  const b = w.mine.blocks[Math.floor(hex.gy / 2)][Math.floor(hex.gx / 2)];
+  b.explored = false;
+  hex.gx = hex.tgx = hex.fromGx = 12; hex.gy = hex.tgy = hex.fromGy = 12; hex.moving = false;
+  hex.place(w.grid);
+  return hex;
+}
+
 const grid = () => ({ zoneCols: 40, zoneRows: 40, zoneW: 10, zoneH: 10 });
 
 // A straight east-west road on row 10 from x=10..20. `oneway` arrows it east.
@@ -1147,7 +1159,7 @@ describe('World — haul cycle integration', () => {
   function setupHaul() {
     const w = new World();
     const { autopilot: ap, roads, grid: g } = w;
-    const hex = w.byLabel.get('HEX01');
+    const hex = hex01AtDefault(w);
     const sbx = Math.floor(hex.gx / 2), sby = Math.floor(hex.gy / 2);
     const b = w.mine.blocks[sby][sbx];
     b.explored = true; b.ore = 'gold'; b.orePct = 15; b.oreRemaining = 1e12; b.dirtRemaining = 0;
@@ -1223,7 +1235,7 @@ describe('World — haul cycle integration', () => {
   it('docks off-road into the cell touching the shovel when no road cell does', () => {
     const w = new World();
     const { autopilot: ap, roads, grid: g } = w;
-    const hex = w.byLabel.get('HEX01');
+    const hex = hex01AtDefault(w);
     const sbx = Math.floor(hex.gx / 2), sby = Math.floor(hex.gy / 2);
     const b = w.mine.blocks[sby][sbx];
     b.explored = true; b.ore = 'gold'; b.orePct = 15; b.oreRemaining = 1e12; b.dirtRemaining = 0;
@@ -1316,7 +1328,7 @@ describe('World — shovel relocation', () => {
   // Strand a shovel on a spent block with a fresh ore block one cell east.
   function setupShovel() {
     const w = new World();
-    const hex = w.byLabel.get('HEX01');
+    const hex = hex01AtDefault(w);
     const bx = Math.floor(hex.gx / 2), by = Math.floor(hex.gy / 2);
     const here = w.mine.blocks[by][bx];
     here.explored = true; here.ore = null; here.oreRemaining = 0;
@@ -1437,10 +1449,12 @@ describe('World — parking alignment & resize', () => {
 
   it('parks a truck nose-up on arrival', () => {
     const w = new World();
-    const oht = w.byLabel.get('OHT01');
+    // OHT03/HEX02: HEX01 starts on drilled ore (the worked example), so its
+    // trucks would head straight back out instead of parking.
+    const oht = w.byLabel.get('OHT03');
     const st = { phase: 'to_parking', dir: null, timer: 0, stuck: 0, want: null, yield: null };
     w.autopilot.state.set(oht, st);
-    w.autopilot.links.set(oht, w.byLabel.get('HEX01'));
+    w.autopilot.links.set(oht, w.byLabel.get('HEX02'));
     // place it right on its slot so _advance reports arrival immediately
     const slot = w.autopilot._parkSlot(oht);
     oht.gx = slot.gx; oht.gy = slot.gy; oht.tgx = slot.gx; oht.tgy = slot.gy; oht.moving = false;
@@ -1485,7 +1499,7 @@ describe('World — parking alignment & resize', () => {
   it('a truck with no free slot waits off-road beside the pad, never blocking a road', () => {
     const w = new World();
     const ap = w.autopilot;
-    const oht = w.byLabel.get('OHT01');
+    const oht = w.byLabel.get('OHT03');                // idle: HEX02 starts with nothing to dig
     const st = ap.state.get(oht);
     st.phase = 'to_parking';
     ap._parkSlot = () => null;                         // pretend the pad is completely full
@@ -1678,5 +1692,22 @@ describe('World — 24h auto-reset', () => {
     const snap = JSON.parse(w.snapshotJson());
     delete snap.startedAt;
     expect(World.fromSnapshot(snap).expired()).toBe(false);
+  });
+});
+
+describe('World — starting example haul', () => {
+  it('HEX01 starts on a drilled ore block touching the demo loop, with OHT01 + OHT02', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const w = new World(seed);
+      const hex = w.byLabel.get('HEX01');
+      const b = w.mine.blocks[Math.floor(hex.gy / 2)][Math.floor(hex.gx / 2)];
+      expect(b.explored).toBe(true);
+      expect(b.oreRemaining).toBeGreaterThan(0);
+      expect(w.autopilot._blockOnRoad(b.x, b.y)).toBe(false);
+      expect(w.autopilot._shovelRoadBays(hex).size).toBeGreaterThan(0);
+      for (const l of ['OHT01', 'OHT02']) {
+        expect(w.autopilot.assignedShovel(w.byLabel.get(l))).toBe(hex);
+      }
+    }
   });
 });

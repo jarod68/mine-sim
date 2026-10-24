@@ -67,6 +67,11 @@ Click **❓ How to play** in the top bar for the in-app guide.
 **Goal:** reveal ore, connect it to a crusher with roads, and let the fleet haul
 it for credit.
 
+**Worked example.** Every new game starts with a one-way demo loop out of the
+parking, past a crusher, and shovel **HEX01** already settled on a drilled ore
+block beside that loop, with haul trucks **OHT01** and **OHT02** assigned to it —
+so the full haul cycle runs from the first second, as a model to copy.
+
 ### Drilling
 
 Click a block to open it; **Drill & Explore** (or press <kbd>X</kbd> on the
