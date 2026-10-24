@@ -399,14 +399,12 @@ export class Roads {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     applyCamera(ctx, this.dpr);
 
-    // pale compacted-dust haul road, one 16×16 texture per cell (slight overlap
-    // hides sub-pixel seams between cells). Degraded cells turn rutted and dark.
-    ctx.imageSmoothingEnabled = false;
-    const pathFill = cellPattern(ctx, 'haulroad', zoneW, zoneH);
-    const wornFill = cellPattern(ctx, 'rutted', zoneW, zoneH);
+    // packed-earth "terre battue" clay surface (slight overlap hides sub-pixel
+    // seams between cells). Degraded cells are rendered darker.
+    ctx.imageSmoothingEnabled = false;   // crisp texels on the pad / plant below
     for (const c of this.cells.values()) {
       if (c.parking) continue;
-      ctx.fillStyle = c.worn ? wornFill : pathFill;
+      ctx.fillStyle = c.worn ? '#5e3520' : '#a85d34';
       ctx.fillRect(c.gx * zoneW, c.gy * zoneH, zoneW + 0.6, zoneH + 0.6);
     }
     // worn cells get a light diagonal hatch (rutted / broken-up surface)

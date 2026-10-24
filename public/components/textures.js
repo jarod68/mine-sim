@@ -1,9 +1,8 @@
 // Blocky 16×16 pixel textures, generated procedurally (no image assets) and
-// cached, in the palette of an Australian open-pit mine: pale compacted-dust
-// haul roads (rutted when worn), concrete pads and plant, and the pit-floor /
-// sandstone / hi-vis / gold-flecked surfaces the UI theme uses. (The mine grid
-// itself keeps its flat ore colours — see game-canvas.js.) Every texture is
-// deterministic.
+// cached, in the palette of an Australian open-pit mine: concrete pads and
+// plant, and the pit-floor / sandstone / hi-vis / gold-flecked surfaces the UI
+// theme uses. (The mine grid and the roads keep their flat colours — see
+// game-canvas.js and roads.js.) Every texture is deterministic.
 
 export const TEX = 16;   // texels per side
 
@@ -24,8 +23,6 @@ function prng(seed) {
 const BASES = {
   pit:       { seed: 23, pal: ['#7a3f24', '#6e3820', '#85482a', '#5f2f1b', '#8c4e2f'] },   // pit floor
   rock:      { seed: 37, pal: ['#8a6a5a', '#7d5f50', '#96766a', '#6f5446', '#a08070'] },   // host rock
-  haulroad:  { seed: 53, pal: ['#d1ad7a', '#c9a36f', '#dab887', '#bf9864', '#d6b27f'] },   // compacted dust
-  rutted:    { seed: 59, pal: ['#9a7650', '#8c6a46', '#a6825a', '#7f5f3e', '#93704b'] },   // worn road
   concrete:  { seed: 61, pal: ['#9a948a', '#8f897f', '#a59f95', '#857f76', '#aaa49a'] },
   sandstone: { seed: 67, pal: ['#a8743f', '#9c6a38', '#b27c45', '#916234', '#ad7842'] },   // UI buttons
   hivis:     { seed: 71, pal: ['#e8651c', '#f06f22', '#dc5d18', '#f47a2c', '#e36a1f'] },   // UI active
@@ -94,7 +91,7 @@ function draw(kind, ctx) {
   bevel(ctx, 0.1);
 }
 
-// The 16×16 canvas for `kind` (pit, rock, haulroad, rutted, concrete, pad,
+// The 16×16 canvas for `kind` (pit, rock, concrete, pad,
 // sandstone, hivis, or gold — rock flecked with gold).
 export function texture(kind) {
   let c = cache.get(kind);
