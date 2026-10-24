@@ -5,6 +5,7 @@
 // the circulation direction of the whole network.
 
 import { applyCamera, toWorld, camera, DPR } from './camera.js';
+import { PIXEL_FONT, cellPattern } from './textures.js';
 
 export class Roads {
   constructor(canvas, view, grid) {
@@ -398,11 +399,14 @@ export class Roads {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     applyCamera(ctx, this.dpr);
 
-    // packed-earth "terre battue" clay surface (slight overlap hides sub-pixel
-    // seams between cells). Degraded cells are rendered darker.
+    // blocky dirt-path surface, one 16×16 texture per cell (slight overlap hides
+    // sub-pixel seams between cells). Degraded cells turn to rutted gravel.
+    ctx.imageSmoothingEnabled = false;
+    const pathFill = cellPattern(ctx, 'path', zoneW, zoneH);
+    const wornFill = cellPattern(ctx, 'gravel', zoneW, zoneH);
     for (const c of this.cells.values()) {
       if (c.parking) continue;
-      ctx.fillStyle = c.worn ? '#5e3520' : '#a85d34';
+      ctx.fillStyle = c.worn ? wornFill : pathFill;
       ctx.fillRect(c.gx * zoneW, c.gy * zoneH, zoneW + 0.6, zoneH + 0.6);
     }
     // worn cells get a light diagonal hatch (rutted / broken-up surface)
@@ -450,7 +454,7 @@ export class Roads {
       const y = p.y * zoneH;
       const w = p.w * zoneW;
       const h = p.h * zoneH;
-      ctx.fillStyle = '#474d57';
+      ctx.fillStyle = cellPattern(ctx, 'bricks', zoneW, zoneH);   // stone-brick pad
       ctx.fillRect(x, y, w, h);
       ctx.strokeStyle = '#f2b81c';
       ctx.lineWidth = 2;
@@ -458,7 +462,7 @@ export class Roads {
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
       ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(242, 184, 28, 0.85)';
-      ctx.font = `bold ${Math.round(Math.min(w, h) * 0.5)}px system-ui`;
+      ctx.font = `bold ${Math.round(Math.min(w, h) * 0.5)}px ${PIXEL_FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('P', x + w / 2, y + h / 2);
@@ -470,9 +474,9 @@ export class Roads {
       const y = cr.y * zoneH;
       const w = cr.w * zoneW;
       const h = cr.h * zoneH;
-      ctx.fillStyle = '#4a4f57';
+      ctx.fillStyle = cellPattern(ctx, 'cobble', zoneW, zoneH);   // cobblestone body
       ctx.fillRect(x, y, w, h);
-      ctx.fillStyle = '#2e3137';            // hopper
+      ctx.fillStyle = '#26262a';            // hopper
       ctx.beginPath();
       ctx.moveTo(x + w * 0.18, y + h * 0.12);
       ctx.lineTo(x + w * 0.82, y + h * 0.12);
@@ -480,11 +484,11 @@ export class Roads {
       ctx.lineTo(x + w * 0.4, y + h * 0.55);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#6b7077';
+      ctx.strokeStyle = '#1b1b1b';
       ctx.lineWidth = 2;
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-      ctx.fillStyle = '#e8e8e8';
-      ctx.font = `bold ${Math.round(Math.min(w, h) * 0.16)}px system-ui`;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${Math.round(Math.min(w, h) * 0.16)}px ${PIXEL_FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('CRUSHER', x + w / 2, y + h * 0.8);

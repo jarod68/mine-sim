@@ -5,6 +5,7 @@
 
 import { applyCamera, visibleRect, DPR, camera } from './camera.js';
 import { COLORS_SOLID } from './mine.js';
+import { PIXEL_FONT } from './textures.js';
 import { drawPickup, drawDozer, drawGrader, drawExcavator, drawOHT } from './vehicle-sprites.js';
 
 const KEY_DIRS = {
@@ -154,13 +155,14 @@ export class Vehicle {
       ctx.save();
       ctx.scale(1 / sc, 1 / sc);                              // switch to screen pixels
       const y = -(this.selR + (this.task ? 15 : 5)) * sc;
-      ctx.font = 'bold 11px system-ui';
+      // blocky name tag: pixel text on a translucent dark plate
+      ctx.font = `12px ${PIXEL_FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.strokeText(this.label, 0, y);
-      ctx.fillStyle = selected ? '#ffd83b' : 'rgba(255, 255, 255, 0.92)';
+      const tw = Math.ceil(ctx.measureText(this.label).width);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillRect(-tw / 2 - 3, y - 14, tw + 6, 15);
+      ctx.fillStyle = selected ? '#ffff55' : '#ffffff';
       ctx.fillText(this.label, 0, y);
       ctx.restore();
     }

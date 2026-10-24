@@ -9,26 +9,27 @@ export const ORE_LABELS = {
   carbon: 'Carbon',
 };
 
-// Terminal / phosphor palette — translucent neon over the near-black canvas so
-// the dark grid shows through (modern "glass terminal" look).
+// Flat fills used when zoomed far out (blocks too small for their pixel
+// texture, see textures.js) — roughly each texture's average colour.
 export const COLORS = {
-  dirt:       'rgba(74, 47, 25, 0.62)',     // dark brown earth (mined-out)
-  iron:       'rgba(150, 90, 230, 0.50)',   // violet
-  copper:     'rgba(255, 145, 70, 0.50)',   // amber
-  gold:       'rgba(240, 226, 96, 0.55)',   // yellow
-  carbon:     'rgba(10, 10, 14, 0.88)',     // near-black
-  unexplored: 'rgba(70, 110, 95, 0.14)',    // dim phosphor void
-  prep:       'rgba(48, 28, 12, 0.82)',     // dark brown — unprepared rich vein
+  dirt:       'rgba(134, 96, 67, 1)',
+  iron:       'rgba(196, 160, 136, 1)',
+  copper:     'rgba(206, 116, 66, 1)',
+  gold:       'rgba(226, 198, 64, 1)',
+  carbon:     'rgba(52, 52, 56, 1)',
+  unexplored: 'rgba(96, 156, 56, 1)',
+  prep:       'rgba(76, 76, 84, 1)',      // deepslate — unprepared rich vein
 };
 
-// Solid (opaque) variants for legend swatches, so faint fills stay readable.
+// Solid swatch colours (popup gauge, stats chart, truck loads): each ore's
+// fleck colour, so they match the textures.
 export const COLORS_SOLID = {
-  dirt:       '#4a2f19',
-  iron:       '#9a5ce6',
-  copper:     '#ff9146',
-  gold:       '#f0e260',
-  carbon:     '#0c0c10',
-  unexplored: '#2f6b56',
+  dirt:       '#866043',
+  iron:       '#d8af93',
+  copper:     '#e07b40',
+  gold:       '#fcee4b',
+  carbon:     '#2b2b2b',
+  unexplored: '#5d9a35',
 };
 
 // Fallback total used for the popup gauge; the authoritative value also comes

@@ -257,7 +257,9 @@ serve.js                  Zero-dependency static file server (dev/prod convenien
 public/
   index.html              UI shell, canvas layers, modals.
   app.js                  Client bootstrap, input, modals, parking resize.
-  style.css               Styles.
+  style.css               Styles (layout).
+  theme-blocky.css        Blocky look: pixel font, stone buttons, tooltip panels.
+  fonts/                  Pixelify Sans (SIL OFL 1.1, self-hosted).
   engine/
     worker.js             Module Web Worker: owns the World, ticks it, autosaves.
     local-engine.js       LocalEngine — drop-in for the old WS Net (talks to worker).
@@ -278,6 +280,7 @@ public/
     block-popup.js        Block composition popup (BlockPopup).
     camera.js             Shared camera transform + coordinate helpers.
     mine.js               Shared colour/label constants.
+    textures.js           Procedural 16×16 pixel textures (blocks, roads, UI).
 scripts/
   capture-screenshots.js  Playwright script that regenerates docs/screenshots.
 test/unit/                Vitest suites (game logic + client renderers).

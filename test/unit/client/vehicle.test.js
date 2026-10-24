@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Vehicle, Fleet } from '../../../public/components/vehicle.js';
-import { fakeCanvas } from './_helpers.js';
+import { fakeCanvas, noopCtx } from './_helpers.js';
 
 const sample = (over = {}) => ({
   label: 'OHT01', type: 'oht', model: 'T264', len: 20, wid: 10,
@@ -35,7 +35,7 @@ describe('Vehicle (client render object)', () => {
   });
 
   it('draws every vehicle type (incl. the PR776 dozer) without throwing', () => {
-    const ctx = new Proxy({}, { get: (t, p) => (p in t ? t[p] : () => {}), set: (t, p, v) => { t[p] = v; return true; } });
+    const ctx = noopCtx();
     const cases = [
       sample({ type: 'oht', load: 120, loadOre: 'iron', task: { kind: 'dump', progress: 0.5 } }),
       sample({ type: 'excavator', model: 'Liebherr R9400', digging: true }),

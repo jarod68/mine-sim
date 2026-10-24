@@ -8,6 +8,7 @@ import { Fleet } from './components/vehicle.js';
 import { Roads } from './components/roads.js';
 import { camera, toWorld } from './components/camera.js';
 import { COLORS_SOLID } from './components/mine.js';
+import { BLOCK_TEXTURE, textureURL } from './components/textures.js';
 import { LocalEngine } from './engine/local-engine.js';
 
 const canvas = document.getElementById('mine');
@@ -122,15 +123,22 @@ function scheduleFrame() {
 function invalidateMine() { mineDirty = true; scheduleFrame(); }
 function invalidateRoads() { roadsDirty = true; scheduleFrame(); }
 function invalidateAll() { mineDirty = roadsDirty = true; scheduleFrame(); }
+// Canvas labels use the self-hosted pixel font: redraw once it has loaded.
+document.fonts?.ready.then(() => invalidateAll());
 
 // ── helpers ──
+// Hand the procedural textures to the CSS theme (backdrop, buttons, panels).
+function paintTheme() {
+  for (const kind of ['dirt', 'stone', 'grass', 'gold'])
+    document.documentElement.style.setProperty(`--tex-${kind}`, `url(${textureURL(kind)})`);
+}
+paintTheme();
+
+// Legend swatches show the very block texture used on the map.
 function paintLegend() {
   for (const sw of document.querySelectorAll('.legend .sw')) {
-    const ore = sw.dataset.ore;
-    if (ore && COLORS_SOLID[ore]) {
-      sw.style.background = COLORS_SOLID[ore];
-      sw.style.boxShadow = `0 0 6px ${COLORS_SOLID[ore]}`;
-    }
+    const kind = BLOCK_TEXTURE[sw.dataset.ore];
+    if (kind) sw.style.backgroundImage = `url(${textureURL(kind)})`;
   }
 }
 

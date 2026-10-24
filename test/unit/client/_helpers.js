@@ -4,9 +4,11 @@
 // in for the (unimplemented) canvas 2D context so render() calls are harmless.
 
 export function noopCtx() {
-  // Methods are no-ops; property assignments (fillStyle, font, …) just stick.
+  // Methods are no-ops returning another such object (so chained calls like
+  // createPattern(...).setTransform(...) or measureText(...).width are harmless);
+  // property assignments (fillStyle, font, …) just stick.
   return new Proxy({}, {
-    get: (t, p) => (p in t ? t[p] : () => {}),
+    get: (t, p) => (p in t ? t[p] : () => noopCtx()),
     set: (t, p, v) => { t[p] = v; return true; },
   });
 }
