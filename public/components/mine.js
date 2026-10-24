@@ -17,7 +17,7 @@ export const COLORS = {
   copper:     'rgba(206, 116, 66, 1)',
   gold:       'rgba(226, 198, 64, 1)',
   carbon:     'rgba(52, 52, 56, 1)',
-  unexplored: 'rgba(96, 156, 56, 1)',
+  unexplored: 'rgba(86, 104, 58, 1)',
   prep:       'rgba(76, 76, 84, 1)',      // deepslate — unprepared rich vein
 };
 
@@ -29,7 +29,7 @@ export const COLORS_SOLID = {
   copper:     '#e07b40',
   gold:       '#fcee4b',
   carbon:     '#2b2b2b',
-  unexplored: '#5d9a35',
+  unexplored: '#56693a',
 };
 
 // Fallback total used for the popup gauge; the authoritative value also comes

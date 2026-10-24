@@ -20,7 +20,7 @@ function prng(seed) {
 }
 
 const BASES = {
-  grass:     { seed: 11, pal: ['#5d9a35', '#6aab3d', '#4f8a2c', '#78b847', '#568f30'] },
+  grass:     { seed: 11, pal: ['#56693a', '#5f7340', '#4c5e33', '#677a47', '#516437'] },   // muted moss
   dirt:      { seed: 23, pal: ['#866043', '#79553a', '#96704e', '#6b4a30', '#8c6748'] },
   stone:     { seed: 37, pal: ['#7f7f7f', '#8b8b8b', '#747474', '#6c6c6c', '#959595'] },
   deepslate: { seed: 41, pal: ['#4b4b52', '#56565e', '#3f3f46', '#5f5f68', '#45454c'] },
