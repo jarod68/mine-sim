@@ -17,6 +17,11 @@ RUN apt-get update && apt-get upgrade -y \
 COPY public ./public
 COPY serve.js ./
 
+# Build stamp shown in the in-app "How to play" footer, so a tester knows which
+# commit they are playing (QA) before promoting it to prod.
+ARG GIT_SHA=dev
+RUN printf '{"sha":"%s"}\n' "$GIT_SHA" > public/version.json
+
 ENV NODE_ENV=production
 ENV PORT=3200
 EXPOSE 3200

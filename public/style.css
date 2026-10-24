@@ -659,6 +659,7 @@ main {
   background: #2563c9; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;
 }
 .about-gh:hover { background: #2f74e0; }
+.about-build { margin-left: 10px; color: #7d8590; font: 12px ui-monospace, monospace; }
 
 .shop-row {
   display: flex;

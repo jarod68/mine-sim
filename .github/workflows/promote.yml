@@ -1,0 +1,60 @@
+name: Promote to prod
+
+# Points jarod68/mine-sim:latest (prod, play.holtz.fr) at an image the CI already
+# built and pushed as :sha-<commit> — no rebuild, so prod runs exactly the bytes
+# tested on QA. Keel then rolls the prod Deployment within ~2 min.
+# Also the rollback path: run it with an older commit.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit to promote (as shown in QA: How to play → build …). Empty = what :qa runs now."
+        required: false
+        default: ""
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  # Manual gate: the `production` environment requires a reviewer's approval.
+  approve:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - env:
+          SHA: ${{ inputs.sha }}
+        run: echo "Promotion of '${SHA:-:qa}' approved."
+
+  promote:
+    runs-on: ubuntu-latest
+    needs: approve
+    environment: build   # DOCKERHUB_USERNAME / DOCKERHUB_TOKEN live in this environment
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Resolve the source image
+        id: src
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SHA" ]; then
+            src="jarod68/mine-sim:qa"
+          else
+            # Accept a short sha: expand it against the repo's history.
+            full="$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" \
+              "https://api.github.com/repos/${{ github.repository }}/commits/$SHA" | jq -r .sha)"
+            src="jarod68/mine-sim:sha-$full"
+          fi
+          docker buildx imagetools inspect "$src" >/dev/null || { echo "::error::$src not found on Docker Hub"; exit 1; }
+          echo "image=$src" >> "$GITHUB_OUTPUT"
+      - name: Re-tag as :latest
+        run: |
+          docker buildx imagetools create -t jarod68/mine-sim:latest "${{ steps.src.outputs.image }}"
+          docker buildx imagetools inspect jarod68/mine-sim:latest | head -3
+          echo "### Promoted \`${{ steps.src.outputs.image }}\` → \`:latest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Keel rolls https://play.holtz.fr within ~2 min." >> "$GITHUB_STEP_SUMMARY"

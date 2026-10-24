@@ -437,8 +437,18 @@ docker build -t mine-sim .
 docker run -p 3200:3200 mine-sim
 ```
 
+**Release flow (CI → QA → prod).** Every green push to `main` makes the CI push
+`jarod68/mine-sim:sha-<commit>` and `:qa`; [Keel](https://keel.sh) on the cluster
+rolls it out to **QA** (<https://qa.play.holtz.fr>) within ~2 min. Check the
+commit you are playing in *How to play* (`build abc1234`), then run **Actions →
+Promote to prod** with that commit (empty = whatever `:qa` runs now) and approve
+it: the workflow re-tags that exact image as `:latest`, and Keel rolls **prod**
+(<https://play.holtz.fr>). To roll back, run it with an older commit. Cluster
+side (Keel, the QA Deployment) lives in the
+[infra-26](https://github.com/jarod68/infra-26) repo.
+
 `npm run docker:build` cross-builds (`linux/amd64,linux/arm64`) and pushes the
-`jarod68/mine-sim:latest` image. The image is `node:22-bookworm-slim` with npm and
+`jarod68/mine-sim:latest` image by hand (bypasses QA — avoid). The image is `node:22-bookworm-slim` with npm and
 other unused tooling stripped for a small CVE surface; it runs as the unprivileged
 `node` user.
 
