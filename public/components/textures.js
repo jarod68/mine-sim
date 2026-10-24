@@ -1,10 +1,9 @@
 // Blocky 16×16 pixel textures, generated procedurally (no image assets) and
-// cached, in the palette of an Australian open-pit iron mine: red-ochre soil
-// with spinifex tufts (unexplored ground), the brown-red pit floor (mined
-// out), red-grey host rock flecked with ore, dark ironstone (unprepared rich
-// veins), pale compacted-dust haul roads, concrete pads and plant — plus the
-// sandstone / hi-vis surfaces the UI theme uses. Every texture is
-// deterministic, so a block always looks the same.
+// cached, in the palette of an Australian open-pit mine: pale compacted-dust
+// haul roads (rutted when worn), concrete pads and plant, and the pit-floor /
+// sandstone / hi-vis / gold-flecked surfaces the UI theme uses. (The mine grid
+// itself keeps its flat ore colours — see game-canvas.js.) Every texture is
+// deterministic.
 
 export const TEX = 16;   // texels per side
 
@@ -23,10 +22,8 @@ function prng(seed) {
 }
 
 const BASES = {
-  soil:      { seed: 11, pal: ['#a4532f', '#b05e36', '#9a4b2a', '#b8693d', '#93472a'] },   // red ochre
   pit:       { seed: 23, pal: ['#7a3f24', '#6e3820', '#85482a', '#5f2f1b', '#8c4e2f'] },   // pit floor
   rock:      { seed: 37, pal: ['#8a6a5a', '#7d5f50', '#96766a', '#6f5446', '#a08070'] },   // host rock
-  ironstone: { seed: 41, pal: ['#4a3530', '#553d36', '#3f2d29', '#5f463e', '#45322d'] },   // rich vein
   haulroad:  { seed: 53, pal: ['#d1ad7a', '#c9a36f', '#dab887', '#bf9864', '#d6b27f'] },   // compacted dust
   rutted:    { seed: 59, pal: ['#9a7650', '#8c6a46', '#a6825a', '#7f5f3e', '#93704b'] },   // worn road
   concrete:  { seed: 61, pal: ['#9a948a', '#8f897f', '#a59f95', '#857f76', '#aaa49a'] },
@@ -34,16 +31,9 @@ const BASES = {
   hivis:     { seed: 71, pal: ['#e8651c', '#f06f22', '#dc5d18', '#f47a2c', '#e36a1f'] },   // UI active
 };
 
-// Spinifex tufts scattered on the soil (texel offsets): dusty sage greens.
-const SPINIFEX = [[3, 4], [4, 4], [4, 3], [11, 9], [12, 9], [12, 8], [6, 13], [7, 13]];
-const SPINIFEX_PAL = ['#8d8a55', '#7a7a4a', '#9a965e'];
-
 // Ore flecks over host rock: light / mid / dark shades of each ore.
 const ORES = {
-  iron:   ['#b0453a', '#7d2a24', '#3e1714'],   // hematite: rust red to near-black
-  copper: ['#5fbf95', '#2f8a68', '#2b5f8a'],   // malachite greens, azurite blue edge
   gold:   ['#ffe08a', '#f2c14e', '#b8862b'],
-  carbon: ['#2e2926', '#1f1b19', '#0f0d0c'],
 };
 
 // Fixed vein clusters (texel offsets), shared by every ore so they read as one family.
@@ -87,11 +77,7 @@ function draw(kind, ctx) {
   if (kind === 'pad') { slabs(ctx); return; }
   if (BASES[kind]) {
     noise(ctx, BASES[kind]);
-    if (kind === 'soil') {
-      const r = prng(BASES.soil.seed + 5);
-      for (const [x, y] of SPINIFEX) { ctx.fillStyle = SPINIFEX_PAL[Math.floor(r() * 3)]; ctx.fillRect(x, y, 1, 1); }
-    }
-    if (kind === 'soil' || kind === 'pit' || kind === 'ironstone') bevel(ctx, 0.12);
+    if (kind === 'pit') bevel(ctx, 0.12);
     return;
   }
   const ore = ORES[kind];
@@ -108,8 +94,8 @@ function draw(kind, ctx) {
   bevel(ctx, 0.1);
 }
 
-// The 16×16 canvas for `kind` (soil, pit, rock, ironstone, haulroad, rutted,
-// concrete, pad, sandstone, hivis, or an ore: iron, copper, gold, carbon).
+// The 16×16 canvas for `kind` (pit, rock, haulroad, rutted, concrete, pad,
+// sandstone, hivis, or gold — rock flecked with gold).
 export function texture(kind) {
   let c = cache.get(kind);
   if (!c) {
@@ -136,31 +122,3 @@ export function textureURL(kind) {
   if (!urls.has(kind)) urls.set(kind, texture(kind).toDataURL());
   return urls.get(kind);
 }
-
-// Mine-grid material → texture kind.
-export const BLOCK_TEXTURE = {
-  unexplored: 'soil', dirt: 'pit', prep: 'ironstone',
-  iron: 'iron', copper: 'copper', gold: 'gold', carbon: 'carbon',
-};
-
-// "Breaking" cracks for a rich vein being prepared: texels revealed in order
-// from the centre outward as a branching random walk, so `progress` 0..1 shows
-// a growing crack pattern (deterministic, same on every block).
-export const CRACK_TEXELS = (() => {
-  const r = prng(77);
-  const seen = new Set();
-  const out = [];
-  const walkers = [[7, 7], [8, 8], [8, 7]];
-  while (out.length < 70 && walkers.length) {
-    const i = Math.floor(r() * walkers.length);
-    const [x, y] = walkers[i];
-    const k = `${x},${y}`;
-    if (!seen.has(k)) { seen.add(k); out.push([x, y]); }
-    const d = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]][Math.floor(r() * 8)];
-    const nx = x + d[0], ny = y + d[1];
-    if (nx < 1 || ny < 1 || nx > TEX - 2 || ny > TEX - 2) { walkers.splice(i, 1); continue; }
-    walkers[i] = [nx, ny];
-    if (r() < 0.08 && walkers.length < 6) walkers.push([nx, ny]);   // branch
-  }
-  return out;
-})();

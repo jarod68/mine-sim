@@ -8,7 +8,7 @@ import { Fleet } from './components/vehicle.js';
 import { Roads } from './components/roads.js';
 import { camera, toWorld } from './components/camera.js';
 import { COLORS_SOLID } from './components/mine.js';
-import { BLOCK_TEXTURE, textureURL } from './components/textures.js';
+import { textureURL } from './components/textures.js';
 import { LocalEngine } from './engine/local-engine.js';
 
 const canvas = document.getElementById('mine');
@@ -135,11 +135,13 @@ function paintTheme() {
 }
 paintTheme();
 
-// Legend swatches show the very block texture used on the map.
 function paintLegend() {
   for (const sw of document.querySelectorAll('.legend .sw')) {
-    const kind = BLOCK_TEXTURE[sw.dataset.ore];
-    if (kind) sw.style.backgroundImage = `url(${textureURL(kind)})`;
+    const ore = sw.dataset.ore;
+    if (ore && COLORS_SOLID[ore]) {
+      sw.style.background = COLORS_SOLID[ore];
+      sw.style.boxShadow = `0 0 6px ${COLORS_SOLID[ore]}`;
+    }
   }
 }
 
